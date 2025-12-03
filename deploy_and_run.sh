@@ -10,8 +10,10 @@ set -euo pipefail
 #  4. Cleans host keys for that IP
 #  5. Uploads startup-amd.sh to the VM
 #  6. Runs it remotely via sudo (with a progress spinner)
-#  7. Opens a new terminal window streaming docker logs -f ollama
-#  8. Prints timing stats at the end
+#  7. Opens TypingMind in Brave browser
+#  8. Opens a new terminal window streaming docker logs -f ollama
+#  9. Prints TypingMind JSON config
+# 10. Prints timing stats at the end
 ###############################################################################
 
 REMOTE_USER="hotaisle"
@@ -30,9 +32,20 @@ ssh_wait_secs=0
 scp_secs=0
 startup_secs=0
 
+# Local browser URL to load TypingMind
+TYPINGMIND_URL="${TYPINGMIND_URL:-http://localhost:3000/#chat=new}"
+
 echo "------------------------------------------------------"
+<<<<<<< HEAD
 echo "[*] Local startup script: $LOCAL_SCRIPT"
 echo "[*] Provided GPU IP (if any): ${GPU_IP:-<none>}"
+=======
+echo "[*] Deploying to GPU instance at: $GPU_IP"
+echo "[*] Remote user: $REMOTE_USER"
+echo "[*] Local script: $LOCAL_SCRIPT"
+echo "[*] Remote script: $REMOTE_PATH"
+echo "[*] TypingMind URL: $TYPINGMIND_URL"
+>>>>>>> ae074d2 (Add automatic TypingMind browser launch after deployment)
 echo "------------------------------------------------------"
 
 ###############################################################################
@@ -196,6 +209,53 @@ echo "[+] Remote deployment and startup script completed (startup: ${startup_sec
 echo "------------------------------------------------------"
 echo "[✔] Remote deployment and startup script completed."
 echo "------------------------------------------------------"
+
+###############################################################################
+#  Launch TypingMind locally in Brave
+###############################################################################
+echo "[*] Launching TypingMind in Brave browser at: $TYPINGMIND_URL"
+brave-browser "$TYPINGMIND_URL" >/dev/null 2>&1 &
+
+###############################################################################
+#  Output TypingMind config JSON
+###############################################################################
+echo
+echo "Paste this JSON into TypingMind's custom model config:"
+echo "------------------------------------------------------"
+cat <<EOF
+{
+  "title": "HotAisle:OSS",
+  "description": "",
+  "iconUrl": "",
+  "endpoint": "http://$GPU_IP:11434/v1/chat/completions",
+  "id": "4445c4db-8527-44bf-98b1-62ac43b52382",
+  "modelID": "gpt-oss:120b",
+  "apiType": "openai",
+  "contextLength": 4096,
+  "headerRows": [],
+  "bodyRows": [],
+  "skipAPIKey": true,
+  "pluginSupported": false,
+  "visionSupported": false,
+  "systemMessageSupported": true,
+  "streamOutputSupported": true,
+  "supportedParameters": [
+    "temperature",
+    "presencePenalty",
+    "frequencyPenalty",
+    "topP",
+    "maxTokens",
+    "contextLimit",
+    "reasoningEffort"
+  ],
+  "pricePerMillionTokens": {
+    "prompt": null,
+    "completion": null
+  }
+}
+EOF
+echo "------------------------------------------------------"
+echo
 
 ###############################################################################
 #  Open a new terminal window for docker logs -f ollama
