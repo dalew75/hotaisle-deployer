@@ -8,10 +8,11 @@ set -euo pipefail
 #  2. Extracts SSH IP from the HotAisle response (prefers ssh_access.ip_address)
 #  3. Cleans host keys for that IP
 #  4. Uploads startup-amd.sh to the VM
-#  5. Runs it remotely via sudo
+#  5. Runs it remotely via sudo (with a progress spinner)
 #  6. Opens TypingMind in Brave browser
-#  7. Prints the ready-to-paste TypingMind JSON config
-#  8. Opens a NEW terminal window streaming docker logs -f ollama
+#  7. Opens a NEW terminal window streaming docker logs -f ollama
+#  8. Prints TypingMind JSON config
+#  9. Prints timing stats as the final output
 ###############################################################################
 
 REMOTE_USER="hotaisle"
@@ -24,6 +25,13 @@ TYPINGMIND_URL="${TYPINGMIND_URL:-http://localhost:3000/#chat=new}"
 
 # Optional argument: GPU IP address (skip provisioning if provided)
 GPU_IP="${1:-}"
+
+# Timing helpers
+script_start_ts=$(date +%s)
+provision_secs=0
+ssh_wait_secs=0
+scp_secs=0
+startup_secs=0
 
 echo "------------------------------------------------------"
 echo "[*] TypingMind URL: $TYPINGMIND_URL"
@@ -49,11 +57,10 @@ if [[ -z "$GPU_IP" ]]; then
   : "${HOTAISLE_TEAM_NAME:?HOTAISLE_TEAM_NAME is not set}"
   : "${HOTAISLE_TOKEN:?HOTAISLE_TOKEN is not set}"
 
-  # Optional user-data file (cloud-init)
   HOTAISLE_USER_DATA_URL="${HOTAISLE_USER_DATA_URL:-}"
 
   # Build payload from known working VM specs
-  read -r -d '' PAYLOAD <<JSON
+  PAYLOAD=$(cat <<JSON
 {
   "cpu_cores": 13,
   "cpus": {
@@ -75,7 +82,9 @@ if [[ -z "$GPU_IP" ]]; then
   "user_data_url": "${HOTAISLE_USER_DATA_URL}"
 }
 JSON
+)
 
+  prov_start_ts=$(date +%s)
   echo "[*] POSTing payload to HotAisle..."
   RESPONSE="$(
     curl -sS -X POST \
@@ -85,10 +94,16 @@ JSON
       -H "Content-Type: application/json" \
       -d "$PAYLOAD"
   )"
+  prov_end_ts=$(date +%s)
+  provision_secs=$((prov_end_ts - prov_start_ts))
 
   echo "------------------------------------------------------"
   echo "[*] HotAisle provision response:"
-  echo "$RESPONSE" | jq . || echo "$RESPONSE"
+  if command -v jq >/dev/null 2>&1; then
+    echo "$RESPONSE" | jq .
+  else
+    echo "$RESPONSE"
+  fi
   echo "------------------------------------------------------"
 
   # Extract IP: prefer ssh_access.ip_address, fallback to ip_address
@@ -97,14 +112,14 @@ JSON
     exit 1
   fi
 
-  GPU_IP="$(echo "$RESPONSE" | jq -r '.[0].ssh_access.ip_address // .[0].ip_address')"
+  GPU_IP="$(echo "$RESPONSE" | jq -r '.ssh_access.ip_address // .ip_address')"
 
   if [[ -z "$GPU_IP" || "$GPU_IP" == "null" ]]; then
     echo "[!] ERROR: Could not extract a usable IP address from the HotAisle response."
     exit 1
   fi
 
-  echo "[+] Provisioned GPU VM IP: $GPU_IP"
+  echo "[+] Provisioned GPU VM IP: $GPU_IP (provision step: ${provision_secs}s)"
 else
   echo "[*] Using provided GPU IP (skipping provisioning): $GPU_IP"
 fi
@@ -131,25 +146,51 @@ SSH_OPTS="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=5"
 #  Wait for VM to be reachable
 ###############################################################################
 echo "[*] Checking if $GPU_IP is reachable via SSH..."
+ssh_wait_start_ts=$(date +%s)
 until ssh $SSH_OPTS "${REMOTE_USER}@${GPU_IP}" "echo connected" &>/dev/null; do
   echo "[-] Not ready yet... retrying in 3 seconds."
   sleep 3
 done
-echo "[+] Remote SSH is ready."
+ssh_wait_end_ts=$(date +%s)
+ssh_wait_secs=$((ssh_wait_end_ts - ssh_wait_start_ts))
+echo "[+] Remote SSH is ready (waited ${ssh_wait_secs}s)."
 
 ###############################################################################
 #  Upload startup-amd.sh
 ###############################################################################
 echo "[*] Copying $LOCAL_SCRIPT to $GPU_IP:$REMOTE_PATH ..."
+scp_start_ts=$(date +%s)
 scp -o StrictHostKeyChecking=accept-new "$LOCAL_SCRIPT" \
     "${REMOTE_USER}@${GPU_IP}:${REMOTE_PATH}"
+scp_end_ts=$(date +%s)
+scp_secs=$((scp_end_ts - scp_start_ts))
+echo "[+] Script copied (scp: ${scp_secs}s)."
 
 ###############################################################################
-#  Run remote setup
+#  Run remote setup (with progress indicator)
 ###############################################################################
-echo "[*] Running script on remote GPU..."
+echo "[*] Running script on remote GPU (this includes model pull; may take a while)..."
+startup_start_ts=$(date +%s)
+
+# Run remote startup in background
 ssh $SSH_OPTS "${REMOTE_USER}@${GPU_IP}" \
-  "chmod +x ${REMOTE_PATH} && sudo ${REMOTE_PATH}"
+  "chmod +x ${REMOTE_PATH} && sudo ${REMOTE_PATH}" &
+ssh_pid=$!
+
+# Simple spinner while the remote script is running
+spin='-\|/'
+i=0
+while kill -0 "$ssh_pid" >/dev/null 2>&1; do
+  printf "\r[remote] Working... %s" "${spin:i++%${#spin}:1}"
+  sleep 1
+done
+
+# Wait for SSH to actually finish, capture exit code
+wait "$ssh_pid"
+startup_end_ts=$(date +%s)
+startup_secs=$((startup_end_ts - startup_start_ts))
+printf "\r[remote] Startup complete.%-20s\n" ""
+echo "[+] Remote deployment and startup script completed (startup: ${startup_secs}s)."
 
 echo "------------------------------------------------------"
 echo "[✔] Remote deployment and startup script completed."
@@ -160,6 +201,20 @@ echo "------------------------------------------------------"
 ###############################################################################
 echo "[*] Launching TypingMind in Brave browser at: $TYPINGMIND_URL"
 brave-browser "$TYPINGMIND_URL" >/dev/null 2>&1 &
+
+###############################################################################
+#  Open a new terminal window for docker logs -f ollama
+###############################################################################
+if command -v gnome-terminal >/dev/null 2>&1; then
+  echo "[*] Opening new terminal for 'docker logs -f ollama'..."
+  gnome-terminal -- bash -lc \
+    "ssh $SSH_OPTS ${REMOTE_USER}@${GPU_IP} 'docker logs -f ollama'; \
+     echo; echo 'Ollama logs ended. Press Enter to close.'; read"
+else
+  echo "[!] gnome-terminal not found."
+  echo "    To watch logs manually, run:"
+  echo "      ssh ${REMOTE_USER}@${GPU_IP} 'docker logs -f ollama'"
+fi
 
 ###############################################################################
 #  Output TypingMind config JSON
@@ -203,15 +258,15 @@ echo "------------------------------------------------------"
 echo
 
 ###############################################################################
-#  Open a new terminal window and stream docker logs -f ollama
+#  Final timing summary (last thing printed)
 ###############################################################################
-if command -v gnome-terminal >/dev/null 2>&1; then
-  echo "[*] Opening new terminal for 'docker logs -f ollama'..."
-  gnome-terminal -- bash -lc \
-    "ssh $SSH_OPTS ${REMOTE_USER}@${GPU_IP} 'docker logs -f ollama'; \
-     echo; echo 'Ollama logs ended. Press Enter to close.'; read"
-else
-  echo "[!] gnome-terminal not found."
-  echo "    To watch logs manually, run:"
-  echo "      ssh ${REMOTE_USER}@${GPU_IP} 'docker logs -f ollama'"
-fi
+script_end_ts=$(date +%s)
+total_secs=$((script_end_ts - script_start_ts))
+
+echo "Timing summary (seconds):"
+echo "  HotAisle provision : ${provision_secs}s"
+echo "  SSH wait           : ${ssh_wait_secs}s"
+echo "  Script upload (scp): ${scp_secs}s"
+echo "  Remote startup     : ${startup_secs}s"
+echo "  TOTAL              : ${total_secs}s"
+echo "------------------------------------------------------"
