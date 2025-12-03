@@ -1,15 +1,16 @@
 # HotAisle GPU VM Deployment Tools
 
-A collection of bash scripts for automating the deployment and management of GPU virtual machines on the HotAisle cloud platform, specifically configured for running large language models (LLMs) via Ollama.
+A collection of bash scripts for automating the deployment and management of GPU virtual machines on the HotAisle cloud platform, specifically configured for running large language models (LLMs) via Ollama and connecting them to TypingMind.
 
 ## Overview
 
 This project provides a streamlined workflow for:
 - **Provisioning** GPU VMs on HotAisle (AMD MI300X)
 - **Deploying** Ollama with the `gpt-oss:120b` model
+- **Connecting** to TypingMind chat interface
 - **Managing** VM lifecycle (provision, deploy, destroy)
 
-The scripts handle the entire pipeline from VM creation to model serving, including SSH setup, Docker configuration, and model downloads.
+The scripts handle the entire pipeline from VM creation to model serving, including SSH setup, Docker configuration, model downloads, and browser integration.
 
 ## Scripts
 
@@ -23,7 +24,9 @@ The primary script that orchestrates the entire deployment process.
 - Cleans SSH host keys for seamless reconnection
 - Uploads startup script to the remote VM
 - Runs remote setup with progress indicators
+- Launches TypingMind in Brave browser
 - Opens separate terminal window for Ollama logs
+- Outputs ready-to-paste TypingMind JSON configuration
 - Displays comprehensive timing statistics
 
 **Usage:**
@@ -39,14 +42,17 @@ The primary script that orchestrates the entire deployment process.
 - `HOTAISLE_TEAM_NAME` - Your HotAisle team name (required for provisioning)
 - `HOTAISLE_TOKEN` - HotAisle API authentication token (required for provisioning)
 - `HOTAISLE_USER_DATA_URL` - Optional cloud-init user-data URL
+- `TYPINGMIND_URL` - TypingMind URL (defaults to `http://localhost:3000/#chat=new`)
 
 **What it does:**
 1. Provisions VM with AMD MI300X GPU (13 CPU cores, 240GB RAM, 12TB disk)
 2. Waits for SSH connectivity
 3. Uploads `startup-amd.sh` to the VM
 4. Executes remote setup (Docker, Ollama, model pull)
-5. Opens Ollama logs in new terminal
-6. Displays timing summary
+5. Launches TypingMind browser locally
+6. Opens Ollama logs in new terminal
+7. Prints TypingMind configuration JSON
+8. Displays timing summary
 
 ### `destroy_vm.sh` - VM Deletion Script
 
@@ -116,6 +122,7 @@ Configures Ollama on NVIDIA GPUs. Similar to `startup-amd.sh` but uses NVIDIA GP
 - `curl` - For API requests
 - `jq` - For JSON parsing
 - `ssh` / `scp` - For remote access
+- `brave-browser` - For TypingMind launch (or modify script)
 - `gnome-terminal` - For log window (optional, falls back to manual command)
 
 ### HotAisle Account
@@ -147,7 +154,9 @@ Configures Ollama on NVIDIA GPUs. Similar to `startup-amd.sh` but uses NVIDIA GP
    ./deploy_and_run.sh
    ```
 
-4. **When done, destroy the VM:**
+4. **Copy the TypingMind JSON config** from the output and paste it into TypingMind's custom model settings.
+
+5. **When done, destroy the VM:**
    ```bash
    # VM name is stored in ~/.hotaisle_last_vm
    ./destroy_vm.sh $(cat ~/.hotaisle_last_vm)
@@ -163,14 +172,21 @@ Configures Ollama on NVIDIA GPUs. Similar to `startup-amd.sh` but uses NVIDIA GP
 # - VM provisioning progress
 # - SSH connection status
 # - Remote setup progress (with spinner)
+# - TypingMind browser launches
 # - Ollama logs open in new terminal
+# - TypingMind JSON config
 # - Timing summary
 
-# 2. Monitor logs
+# 2. Use TypingMind
+# - Browser opens automatically
+# - Paste the JSON config
+# - Start chatting with gpt-oss:120b
+
+# 3. Monitor logs
 # - Check the separate terminal window
 # - Or manually: ssh hotaisle@<IP> 'docker logs -f ollama'
 
-# 3. Clean up
+# 4. Clean up
 ./destroy_vm.sh $(cat ~/.hotaisle_last_vm)
 ```
 
@@ -209,7 +225,7 @@ The default VM configuration when provisioning:
 - Verify GPU is accessible: `docker logs ollama`
 - Model download can take 30+ minutes for 120B model
 
-### API Endpoint Not Accessible
+### TypingMind Not Connecting
 - Verify Ollama is running: `ssh hotaisle@<IP> 'docker ps'`
 - Check API endpoint: `curl http://<VM_IP>:11434/v1/models`
 - Ensure firewall allows port 11434
