@@ -6,17 +6,19 @@ set -euo pipefail
 #
 #  1. Optionally provisions a new HotAisle VM (if no IP provided)
 #  2. Extracts SSH IP from the HotAisle response
-#  3. Cleans host keys for that IP
-#  4. Uploads startup-amd.sh to the VM
-#  5. Runs it remotely via sudo (with a progress spinner)
-#  6. Opens a new terminal window streaming docker logs -f ollama
-#  7. Prints timing stats as the final output
+#  3. Stores last VM name in ~/.hotaisle_last_vm
+#  4. Cleans host keys for that IP
+#  5. Uploads startup-amd.sh to the VM
+#  6. Runs it remotely via sudo (with a progress spinner)
+#  7. Opens a new terminal window streaming docker logs -f ollama
+#  8. Prints timing stats at the end
 ###############################################################################
 
 REMOTE_USER="hotaisle"
 REMOTE_PATH="/home/hotaisle/start.sh"
 LOCAL_SCRIPT="startup-amd.sh"
 KNOWN_HOSTS_FILE="${HOME}/.ssh/known_hosts"
+LAST_VM_FILE="${HOME}/.hotaisle_last_vm"
 
 # Optional argument: GPU IP address (skip provisioning if provided)
 GPU_IP="${1:-}"
@@ -99,6 +101,11 @@ JSON
     echo "$RESPONSE"
   fi
   echo "------------------------------------------------------"
+
+  # Store VM name locally for destroy_vm.sh
+  VM_NAME="$(echo "$RESPONSE" | jq -r '.name')"
+  echo "$VM_NAME" > "$LAST_VM_FILE"
+  echo "[*] Recorded last provisioned VM name '$VM_NAME' in $LAST_VM_FILE"
 
   # Extract IP: prefer ssh_access.ip_address, fallback to ip_address
   if ! command -v jq >/dev/null 2>&1; then
