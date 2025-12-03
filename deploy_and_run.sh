@@ -95,7 +95,12 @@ EOF
 echo "------------------------------------------------------"
 echo
 
-# --- Immediately show Ollama logs from remote -------------------------------
-echo "[*] Streaming 'docker logs -f ollama' from remote..."
-echo "    (Ctrl+C to stop watching logs.)"
-ssh $SSH_OPTS "${REMOTE_USER}@${GPU_IP}" "docker logs -f ollama"
+# --- Open a NEW terminal window for Ollama logs -----------------------------
+if command -v gnome-terminal >/dev/null 2>&1; then
+  echo "[*] Opening new terminal window to stream 'docker logs -f ollama'..."
+  gnome-terminal -- bash -lc "ssh $SSH_OPTS ${REMOTE_USER}@${GPU_IP} 'docker logs -f ollama'; echo; echo 'Ollama logs session ended. Press Enter to close.'; read"
+else
+  echo "[!] Could not find gnome-terminal."
+  echo "    To watch logs manually, run this in another terminal:"
+  echo "    ssh $SSH_OPTS ${REMOTE_USER}@${GPU_IP} 'docker logs -f ollama'"
+fi
