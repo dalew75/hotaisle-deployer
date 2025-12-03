@@ -11,6 +11,7 @@ GPU_IP="$1"
 REMOTE_USER="hotaisle"
 REMOTE_PATH="/home/hotaisle/start.sh"
 LOCAL_SCRIPT="startup-amd.sh"
+KNOWN_HOSTS_FILE="${HOME}/.ssh/known_hosts"
 
 echo "------------------------------------------------------"
 echo "[*] Deploying to GPU instance at: $GPU_IP"
@@ -25,9 +26,19 @@ if [[ ! -f "$LOCAL_SCRIPT" ]]; then
   exit 1
 fi
 
-# --- Wait until the host is SSH-responsive (optional but useful) ------------
+# --- Clean up old SSH host keys for this IP ---------------------------------
+echo "[*] Cleaning old SSH host keys for ${GPU_IP} (if any)..."
+if [[ -f "$KNOWN_HOSTS_FILE" ]]; then
+  ssh-keygen -f "$KNOWN_HOSTS_FILE" -R "$GPU_IP" >/dev/null 2>&1 || true
+  ssh-keygen -f "$KNOWN_HOSTS_FILE" -R "[$GPU_IP]" >/dev/null 2>&1 || true
+fi
+
+# Common SSH options: auto-accept new host key, timeout for retries
+SSH_OPTS="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=5"
+
+# --- Wait until the host is SSH-responsive ----------------------------------
 echo "[*] Checking if $GPU_IP is reachable via SSH..."
-until ssh -o BatchMode=yes -o ConnectTimeout=5 "${REMOTE_USER}@${GPU_IP}" "echo connected" &>/dev/null; do
+until ssh $SSH_OPTS "${REMOTE_USER}@${GPU_IP}" "echo connected" &>/dev/null; do
   echo "[-] Not ready yet... retrying in 3 seconds."
   sleep 3
 done
@@ -35,11 +46,11 @@ echo "[+] Remote SSH is ready."
 
 # --- Copy script to remote --------------------------------------------------
 echo "[*] Copying $LOCAL_SCRIPT to $GPU_IP:$REMOTE_PATH ..."
-scp "$LOCAL_SCRIPT" "${REMOTE_USER}@${GPU_IP}:${REMOTE_PATH}"
+scp -o StrictHostKeyChecking=accept-new "$LOCAL_SCRIPT" "${REMOTE_USER}@${GPU_IP}:${REMOTE_PATH}"
 
 # --- Run remotely -----------------------------------------------------------
 echo "[*] Running script on remote GPU..."
-ssh "${REMOTE_USER}@${GPU_IP}" "chmod +x ${REMOTE_PATH} && sudo ${REMOTE_PATH}"
+ssh $SSH_OPTS "${REMOTE_USER}@${GPU_IP}" "chmod +x ${REMOTE_PATH} && sudo ${REMOTE_PATH}"
 
 echo "------------------------------------------------------"
 echo "[✔] Remote deployment and startup script completed."
@@ -87,4 +98,4 @@ echo
 # --- Immediately show Ollama logs from remote -------------------------------
 echo "[*] Streaming 'docker logs -f ollama' from remote..."
 echo "    (Ctrl+C to stop watching logs.)"
-ssh "${REMOTE_USER}@${GPU_IP}" "docker logs -f ollama"
+ssh $SSH_OPTS "${REMOTE_USER}@${GPU_IP}" "docker logs -f ollama"
