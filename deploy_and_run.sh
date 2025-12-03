@@ -13,11 +13,15 @@ REMOTE_PATH="/home/hotaisle/start.sh"
 LOCAL_SCRIPT="startup-amd.sh"
 KNOWN_HOSTS_FILE="${HOME}/.ssh/known_hosts"
 
+# Local browser URL to load TypingMind
+TYPINGMIND_URL="${TYPINGMIND_URL:-http://localhost:3000/#chat=new}"
+
 echo "------------------------------------------------------"
 echo "[*] Deploying to GPU instance at: $GPU_IP"
 echo "[*] Remote user: $REMOTE_USER"
 echo "[*] Local script: $LOCAL_SCRIPT"
 echo "[*] Remote script: $REMOTE_PATH"
+echo "[*] TypingMind URL: $TYPINGMIND_URL"
 echo "------------------------------------------------------"
 
 # --- Ensure local script exists ---------------------------------------------
@@ -55,6 +59,10 @@ ssh $SSH_OPTS "${REMOTE_USER}@${GPU_IP}" "chmod +x ${REMOTE_PATH} && sudo ${REMO
 echo "------------------------------------------------------"
 echo "[✔] Remote deployment and startup script completed."
 echo "------------------------------------------------------"
+
+# --- After successful startup, launch TypingMind locally --------------------
+echo "[*] Launching TypingMind in Brave browser ..."
+brave-browser "$TYPINGMIND_URL" >/dev/null 2>&1 &
 
 # --- Print TypingMind custom model JSON ------------------------------------
 echo
