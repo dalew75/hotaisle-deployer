@@ -14,8 +14,8 @@ set -euo pipefail
 #  8. Prints timing stats at the end
 ###############################################################################
 
-REMOTE_USER="hotaisle"
-REMOTE_PATH="/home/hotaisle/start.sh"
+REMOTE_USER="${REMOTE_USER:-hotaisle}"
+REMOTE_PATH="/home/${REMOTE_USER}/start.sh"
 LOCAL_SCRIPT="startup-amd.sh"
 KNOWN_HOSTS_FILE="${HOME}/.ssh/known_hosts"
 LAST_VM_FILE="${HOME}/.hotaisle_last_vm"

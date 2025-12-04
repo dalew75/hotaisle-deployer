@@ -58,8 +58,10 @@ echo "    - URL: ${URL}"
 echo "------------------------------------------------------"
 
 # Perform DELETE request and capture HTTP status code
+TEMP_RESPONSE_FILE=$(mktemp /tmp/hotaisle_delete_response.XXXXXX)
+trap 'rm -f "$TEMP_RESPONSE_FILE"' EXIT
 HTTP_STATUS="$(
-  curl -s -o /tmp/hotaisle_delete_response.txt -w "%{http_code}" \
+  curl -s -o "$TEMP_RESPONSE_FILE" -w "%{http_code}" \
     -X DELETE \
     "$URL" \
     -H "accept: application/json" \
@@ -88,7 +90,7 @@ else
   echo "❌ ERROR: VM delete failed. Status: ${HTTP_STATUS}"
   echo "Returned body:"
   echo "------------------------------------------------------"
-  cat /tmp/hotaisle_delete_response.txt
+  cat "$TEMP_RESPONSE_FILE"
   echo
   echo "------------------------------------------------------"
   exit 1
