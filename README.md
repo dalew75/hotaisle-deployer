@@ -39,6 +39,7 @@ The primary script that orchestrates the entire deployment process.
 - `HOTAISLE_TEAM_NAME` - Your HotAisle team name (required for provisioning)
 - `HOTAISLE_TOKEN` - HotAisle API authentication token (required for provisioning)
 - `HOTAISLE_USER_DATA_URL` - Optional cloud-init user-data URL
+- `REMOTE_USER` - SSH username for remote VM (default: `hotaisle`)
 
 **What it does:**
 1. Provisions VM with AMD MI300X GPU (13 CPU cores, 240GB RAM, 12TB disk)
@@ -116,7 +117,11 @@ Configures Ollama on NVIDIA GPUs. Similar to `startup-amd.sh` but uses NVIDIA GP
 - `curl` - For API requests
 - `jq` - For JSON parsing
 - `ssh` / `scp` - For remote access
-- `gnome-terminal` - For log window (optional, falls back to manual command)
+- Terminal emulator (optional):
+  - Linux/GNOME: `gnome-terminal` (auto-detected)
+  - macOS: `Terminal.app` or `iTerm2` (manual command provided)
+  - Windows: WSL or Git Bash (manual command provided)
+  - If no terminal emulator is found, the script will display the manual command to run
 
 ### HotAisle Account
 - HotAisle team name
@@ -135,6 +140,8 @@ Configures Ollama on NVIDIA GPUs. Similar to `startup-amd.sh` but uses NVIDIA GP
    ```bash
    export HOTAISLE_TEAM_NAME="your-team-name"
    export HOTAISLE_TOKEN="your-api-token"
+   # Optional: if your HotAisle VMs use a different SSH username
+   export REMOTE_USER="hotaisle"  # default
    ```
 
 2. **Make scripts executable:**
@@ -229,5 +236,5 @@ The default VM configuration when provisioning:
 
 ## License
 
-This project is provided as-is for managing HotAisle GPU VMs.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
