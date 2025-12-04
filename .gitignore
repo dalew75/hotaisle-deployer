@@ -1,0 +1,11 @@
+# User-specific files
+.hotaisle_last_vm
+*.log
+
+# Temporary files
+/tmp/hotaisle_*
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
