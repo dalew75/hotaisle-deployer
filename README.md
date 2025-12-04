@@ -91,25 +91,6 @@ Configures Ollama on AMD GPUs using ROCm. This script is uploaded to and execute
 
 **Target:** AMD MI300X GPUs with ROCm support
 
-### `startup-nvidia.sh` - NVIDIA GPU Setup Script
-
-Configures Ollama on NVIDIA GPUs. Similar to `startup-amd.sh` but uses NVIDIA GPU support.
-
-**Features:**
-- Installs Docker if not present
-- Pulls Ollama image (`ollama/ollama:0.12.0`)
-- Configures GPU access via `--gpus all`
-- Pulls `gpt-oss:120b` model
-- Exposes OpenAI-compatible API endpoint
-
-**Environment Variables:**
-- `MODEL_NAME` - Model to pull (default: `gpt-oss:120b`)
-- `OLLAMA_IMAGE` - Ollama Docker image (default: `ollama/ollama:0.12.0`)
-- `DATA_DIR` - Data directory (default: `/opt/ollama`)
-- `PORT` - API port (default: `11434`)
-
-**Target:** NVIDIA GPUs with CUDA support
-
 ## Prerequisites
 
 ### Local Machine
@@ -132,7 +113,7 @@ Configures Ollama on NVIDIA GPUs. Similar to `startup-amd.sh` but uses NVIDIA GP
 - Ubuntu/Debian-based Linux
 - Internet connectivity
 - Sudo access for `hotaisle` user
-- GPU drivers (ROCm for AMD, CUDA for NVIDIA)
+- GPU drivers (ROCm for AMD)
 
 ## Quick Start
 
@@ -146,7 +127,7 @@ Configures Ollama on NVIDIA GPUs. Similar to `startup-amd.sh` but uses NVIDIA GP
 
 2. **Make scripts executable:**
    ```bash
-   chmod +x deploy_and_run.sh destroy_vm.sh startup-amd.sh startup-nvidia.sh
+   chmod +x deploy_and_run.sh destroy_vm.sh startup-amd.sh
    ```
 
 3. **Deploy to a new VM:**
