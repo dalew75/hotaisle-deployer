@@ -10,7 +10,7 @@ set -euo pipefail
 #  4. Cleans host keys for that IP
 #  5. Uploads startup script (Ollama or vLLM) to the VM
 #  6. Runs it remotely via sudo (with a progress spinner)
-#  7. Opens a new terminal window for logs (docker logs -f ollama or tail vllm.log)
+#  7. Opens a new terminal window for logs (docker logs -f ollama or docker logs -f vllm)
 #  8. Prints timing stats at the end
 #
 #  Usage:
@@ -274,9 +274,9 @@ echo "------------------------------------------------------"
 ###############################################################################
 if command -v gnome-terminal >/dev/null 2>&1; then
   if [[ "$BACKEND" == "vllm" ]]; then
-    echo "[*] Opening new terminal for vLLM logs (tail -f /tmp/vllm.log)..."
+    echo "[*] Opening new terminal for 'docker logs -f vllm'..."
     gnome-terminal -- bash -lc \
-      "ssh $SSH_OPTS ${REMOTE_USER}@${GPU_IP} 'tail -f /tmp/vllm.log'; \
+      "ssh $SSH_OPTS ${REMOTE_USER}@${GPU_IP} 'docker logs -f vllm'; \
        echo; echo 'vLLM logs ended. Press Enter to close.'; read"
   else
     echo "[*] Opening new terminal for 'docker logs -f ollama'..."
@@ -288,7 +288,7 @@ else
   echo "[!] gnome-terminal not found."
   echo "    To watch logs manually, run:"
   if [[ "$BACKEND" == "vllm" ]]; then
-    echo "      ssh ${REMOTE_USER}@${GPU_IP} 'tail -f /tmp/vllm.log'"
+    echo "      ssh ${REMOTE_USER}@${GPU_IP} 'docker logs -f vllm'"
   else
     echo "      ssh ${REMOTE_USER}@${GPU_IP} 'docker logs -f ollama'"
   fi
