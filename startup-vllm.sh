@@ -10,6 +10,8 @@
 #                  If comma-separated list, the first model is served (vLLM serves one per process).
 #   VLLM_PORT    - Port for vLLM API (default: 8000)
 #   VLLM_LOG     - Log file path (default: /tmp/vllm.log)
+#   VLLM_ROCM_INDEX - Pip index for ROCm wheels (default: https://wheels.vllm.ai/rocm/)
+#                     Pre-built wheels require ROCm 7.0; for older ROCm, build from source.
 
 set -euo pipefail
 
@@ -58,13 +60,18 @@ fi
 
 echo "[*] Using: $PIP_CMD ($($PIP_CMD --version 2>/dev/null || true))"
 
-# ---- Install vLLM -----------------------------------------------------------
-if ! $PIP_CMD show vllm &>/dev/null; then
-  echo "[*] Installing vllm (this may take a few minutes)..."
-  $PIP_CMD install vllm
-else
-  echo "[*] vllm already installed."
+# ---- Install vLLM (ROCm build for AMD GPUs) ----------------------------------
+# Default pip install vllm gives CUDA build; AMD/ROCm needs wheels from vLLM's ROCm index.
+# See: https://docs.vllm.ai/en/stable/getting_started/installation/gpu.html?device=rocm
+VLLM_ROCM_INDEX="${VLLM_ROCM_INDEX:-https://wheels.vllm.ai/rocm/}"
+if $PIP_CMD show vllm &>/dev/null; then
+  echo "[*] Uninstalling existing vllm (may be CUDA build)..."
+  $PIP_CMD uninstall -y vllm 2>/dev/null || true
 fi
+echo "[*] Installing vllm for ROCm/AMD from $VLLM_ROCM_INDEX (this may take a few minutes)..."
+$PIP_CMD install vllm --no-cache-dir \
+  --index-url "$VLLM_ROCM_INDEX" \
+  --extra-index-url https://pypi.org/simple
 
 # ---- Run vLLM server in background ------------------------------------------
 echo "[*] Starting vLLM server: $MODEL_TO_SERVE on port $VLLM_PORT ..."
