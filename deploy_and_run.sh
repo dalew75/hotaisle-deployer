@@ -8,20 +8,61 @@ set -euo pipefail
 #  2. Extracts SSH IP from the HotAisle response
 #  3. Stores last VM name in ~/.hotaisle_last_vm
 #  4. Cleans host keys for that IP
-#  5. Uploads startup-amd.sh to the VM
+#  5. Uploads startup script (Ollama or vLLM) to the VM
 #  6. Runs it remotely via sudo (with a progress spinner)
-#  7. Opens a new terminal window streaming docker logs -f ollama
+#  7. Opens a new terminal window for logs (docker logs -f ollama or tail vllm.log)
 #  8. Prints timing stats at the end
+#
+#  Usage:
+#    ./deploy_and_run.sh [OPTIONS] [GPU_IP]
+#    Options: --vllm | --backend ollama|vllm | --model "Model/Name"
+#    Default backend: ollama. Default vLLM model: Qwen/Qwen2.5-VL-72B-Instruct
 ###############################################################################
 
 REMOTE_USER="${REMOTE_USER:-hotaisle}"
 REMOTE_PATH="/home/${REMOTE_USER}/start.sh"
-LOCAL_SCRIPT="startup-amd.sh"
 KNOWN_HOSTS_FILE="${HOME}/.ssh/known_hosts"
 LAST_VM_FILE="${HOME}/.hotaisle_last_vm"
 
-# Optional argument: GPU IP address (skip provisioning if provided)
+# Parse arguments: --vllm, --backend <name>, --model <name>, then optional GPU_IP
+BACKEND="ollama"
+VLLM_MODEL=""
+while [[ $# -gt 0 ]] && [[ "$1" == -* ]]; do
+  case "$1" in
+    --vllm)
+      BACKEND="vllm"
+      shift
+      ;;
+    --backend)
+      BACKEND="$2"
+      shift 2
+      ;;
+    --model)
+      VLLM_MODEL="$2"
+      shift 2
+      ;;
+    *)
+      echo "[!] Unknown option: $1"
+      exit 1
+      ;;
+  esac
+done
 GPU_IP="${1:-}"
+
+# Set script and default model by backend
+case "$BACKEND" in
+  vllm)
+    LOCAL_SCRIPT="startup-vllm.sh"
+    VLLM_MODEL="${VLLM_MODEL:-Qwen/Qwen2.5-VL-72B-Instruct}"
+    ;;
+  ollama)
+    LOCAL_SCRIPT="startup-amd.sh"
+    ;;
+  *)
+    echo "[!] ERROR: Unknown backend '$BACKEND'. Use ollama or vllm."
+    exit 1
+    ;;
+esac
 
 # Timing helpers
 script_start_ts=$(date +%s)
@@ -31,12 +72,16 @@ scp_secs=0
 startup_secs=0
 
 echo "------------------------------------------------------"
-echo "[*] Local startup script: $LOCAL_SCRIPT"
-echo "[*] Provided GPU IP (if any): ${GPU_IP:-<none>}"
+echo "[*] Backend:         $BACKEND"
+echo "[*] Local script:    $LOCAL_SCRIPT"
+echo "[*] Provided GPU IP: ${GPU_IP:-<none>}"
+if [[ "$BACKEND" == "vllm" ]]; then
+  echo "[*] vLLM model:      $VLLM_MODEL"
+fi
 echo "------------------------------------------------------"
 
 ###############################################################################
-#  Ensure startup-amd.sh exists locally
+#  Ensure startup script exists locally
 ###############################################################################
 if [[ ! -f "$LOCAL_SCRIPT" ]]; then
   echo "[!] ERROR: Local script '$LOCAL_SCRIPT' not found."
@@ -44,10 +89,11 @@ if [[ ! -f "$LOCAL_SCRIPT" ]]; then
 fi
 
 ###############################################################################
-#  If no IP provided → Provision new HotAisle VM
+#  Provision new HotAisle VM function
 ###############################################################################
-if [[ -z "$GPU_IP" ]]; then
-  echo "[*] No GPU IP provided — provisioning a new VM via HotAisle API..."
+provision_vm() {
+  local message="$1"
+  echo "$message"
 
   # Must have these set
   : "${HOTAISLE_TEAM_NAME:?HOTAISLE_TEAM_NAME is not set}"
@@ -121,6 +167,22 @@ JSON
   fi
 
   echo "[+] Provisioned GPU VM IP: $GPU_IP (provision step: ${provision_secs}s)"
+}
+
+###############################################################################
+#  If GPU_IP is 'new' → Provision new HotAisle VM and exit
+###############################################################################
+if [[ "$GPU_IP" == "new" ]]; then
+  provision_vm "[*] GPU_IP='new' — provisioning a new VM via HotAisle API (no deployment)..."
+  echo "[*] Exiting without deploying (GPU_IP='new' mode)."
+  exit 0
+fi
+
+###############################################################################
+#  If no IP provided → Provision new HotAisle VM
+###############################################################################
+if [[ -z "$GPU_IP" ]]; then
+  provision_vm "[*] No GPU IP provided — provisioning a new VM via HotAisle API..."
 else
   echo "[*] Using provided GPU IP (skipping provisioning): $GPU_IP"
 fi
@@ -157,7 +219,7 @@ ssh_wait_secs=$((ssh_wait_end_ts - ssh_wait_start_ts))
 echo "[+] Remote SSH is ready (waited ${ssh_wait_secs}s)."
 
 ###############################################################################
-#  Upload startup-amd.sh
+#  Upload startup script
 ###############################################################################
 echo "[*] Copying $LOCAL_SCRIPT to $GPU_IP:$REMOTE_PATH ..."
 scp_start_ts=$(date +%s)
@@ -170,12 +232,22 @@ echo "[+] Script copied (scp: ${scp_secs}s)."
 ###############################################################################
 #  Run remote setup (with progress indicator)
 ###############################################################################
-echo "[*] Running script on remote GPU (this includes model pull; may take a while)..."
+if [[ "$BACKEND" == "vllm" ]]; then
+  echo "[*] Running script on remote GPU (vLLM install and serve; may take a while)..."
+else
+  echo "[*] Running script on remote GPU (this includes model pull; may take a while)..."
+fi
 startup_start_ts=$(date +%s)
 
-# Run remote startup in background
-ssh $SSH_OPTS "${REMOTE_USER}@${GPU_IP}" \
-  "chmod +x ${REMOTE_PATH} && sudo ${REMOTE_PATH}" &
+# Run remote startup in background (vLLM needs VLLM_MODEL and sudo -E to preserve env)
+if [[ "$BACKEND" == "vllm" ]]; then
+  # Pass model via env; sudo -E keeps VLLM_MODEL for the script
+  ssh $SSH_OPTS "${REMOTE_USER}@${GPU_IP}" \
+    "export VLLM_MODEL='$(echo "$VLLM_MODEL" | sed "s/'/'\\\\''/g")'; chmod +x ${REMOTE_PATH} && sudo -E ${REMOTE_PATH}" &
+else
+  ssh $SSH_OPTS "${REMOTE_USER}@${GPU_IP}" \
+    "chmod +x ${REMOTE_PATH} && sudo ${REMOTE_PATH}" &
+fi
 ssh_pid=$!
 
 # Simple spinner while the remote script is running
@@ -198,17 +270,28 @@ echo "[✔] Remote deployment and startup script completed."
 echo "------------------------------------------------------"
 
 ###############################################################################
-#  Open a new terminal window for docker logs -f ollama
+#  Open a new terminal window for logs
 ###############################################################################
 if command -v gnome-terminal >/dev/null 2>&1; then
-  echo "[*] Opening new terminal for 'docker logs -f ollama'..."
-  gnome-terminal -- bash -lc \
-    "ssh $SSH_OPTS ${REMOTE_USER}@${GPU_IP} 'docker logs -f ollama'; \
-     echo; echo 'Ollama logs ended. Press Enter to close.'; read"
+  if [[ "$BACKEND" == "vllm" ]]; then
+    echo "[*] Opening new terminal for vLLM logs (tail -f /tmp/vllm.log)..."
+    gnome-terminal -- bash -lc \
+      "ssh $SSH_OPTS ${REMOTE_USER}@${GPU_IP} 'tail -f /tmp/vllm.log'; \
+       echo; echo 'vLLM logs ended. Press Enter to close.'; read"
+  else
+    echo "[*] Opening new terminal for 'docker logs -f ollama'..."
+    gnome-terminal -- bash -lc \
+      "ssh $SSH_OPTS ${REMOTE_USER}@${GPU_IP} 'docker logs -f ollama'; \
+       echo; echo 'Ollama logs ended. Press Enter to close.'; read"
+  fi
 else
   echo "[!] gnome-terminal not found."
   echo "    To watch logs manually, run:"
-  echo "      ssh ${REMOTE_USER}@${GPU_IP} 'docker logs -f ollama'"
+  if [[ "$BACKEND" == "vllm" ]]; then
+    echo "      ssh ${REMOTE_USER}@${GPU_IP} 'tail -f /tmp/vllm.log'"
+  else
+    echo "      ssh ${REMOTE_USER}@${GPU_IP} 'docker logs -f ollama'"
+  fi
 fi
 
 ###############################################################################
