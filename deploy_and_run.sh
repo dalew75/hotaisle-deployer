@@ -13,11 +13,13 @@ set -euo pipefail
 #  7. Opens a new terminal window for logs (docker logs -f ollama or vllm)
 #  8. Prints timing stats at the end
 #
-#  Usage: ./deploy_and_run.sh [--vllm] [--model <model>] [GPU_IP]
-#  Without --vllm: deploy Ollama (--model is Ollama model, default gpt-oss:120b).
-#  With --vllm:    deploy vLLM (--model is HuggingFace model, default Qwen/Qwen2.5-VL-72B-Instruct).
+#  Usage: ./deploy_and_run.sh [--vllm] [--model <model>] [--hf-token <token>] [GPU_IP]
+#  Without --vllm: deploy Ollama (--model is Ollama model, e.g. llama3.2:3b).
+#  With --vllm:    deploy vLLM (--model must be a Hugging Face ID, e.g. Qwen/Qwen2.5-72B-Instruct).
+#                  Use --hf-token for gated models.
 #  Example: ./deploy_and_run.sh --model llama3.2:3b
-#           ./deploy_and_run.sh --vllm --model Qwen/Qwen2.5-VL-7B-Instruct 192.168.1.10
+#           ./deploy_and_run.sh --vllm --model Qwen/Qwen2.5-72B-Instruct
+#           ./deploy_and_run.sh --vllm --model Qwen/Qwen2.5-72B-Instruct --hf-token hf_xxx 192.168.1.10
 ###############################################################################
 
 REMOTE_USER="${REMOTE_USER:-hotaisle}"
@@ -25,9 +27,10 @@ REMOTE_PATH="/home/${REMOTE_USER}/start.sh"
 KNOWN_HOSTS_FILE="${HOME}/.ssh/known_hosts"
 LAST_VM_FILE="${HOME}/.hotaisle_last_vm"
 
-# Parse arguments: --vllm, --model <name>, then optional GPU_IP
+# Parse arguments: --vllm, --model <name>, --hf-token <token>, then optional GPU_IP
 BACKEND="ollama"
 MODEL_ARG=""
+HF_TOKEN_ARG=""
 while [[ $# -gt 0 ]] && [[ "$1" == -* ]]; do
   case "$1" in
     --vllm)
@@ -36,6 +39,10 @@ while [[ $# -gt 0 ]] && [[ "$1" == -* ]]; do
       ;;
     --model)
       MODEL_ARG="$2"
+      shift 2
+      ;;
+    --hf-token)
+      HF_TOKEN_ARG="$2"
       shift 2
       ;;
     *)
@@ -51,6 +58,13 @@ if [[ "$BACKEND" == "vllm" ]]; then
   LOCAL_SCRIPT="startup-vllm.sh"
   VLLM_MODEL="${MODEL_ARG:-Qwen/Qwen2.5-VL-72B-Instruct}"
   OLLAMA_MODEL=""
+  # vLLM expects a Hugging Face model ID (e.g. Qwen/Qwen2.5-72B-Instruct), not an Ollama tag (e.g. qwen3.5:122b)
+  if [[ -n "$MODEL_ARG" && "$MODEL_ARG" == *:* && "$MODEL_ARG" != */* ]]; then
+    echo "[!] ERROR: With --vllm, --model must be a Hugging Face model ID (e.g. Qwen/Qwen2.5-72B-Instruct), not an Ollama tag."
+    echo "    You passed: $MODEL_ARG"
+    echo "    Use format: org/model-name (e.g. Qwen/Qwen2.5-72B-Instruct or Qwen/Qwen2.5-VL-7B-Instruct)."
+    exit 1
+  fi
 else
   LOCAL_SCRIPT="startup-amd.sh"
   OLLAMA_MODEL="${MODEL_ARG:-}"
@@ -70,6 +84,9 @@ echo "[*] Local script:    $LOCAL_SCRIPT"
 echo "[*] Provided GPU IP: ${GPU_IP:-<none>}"
 if [[ "$BACKEND" == "vllm" ]]; then
   echo "[*] vLLM model:       $VLLM_MODEL"
+  if [[ -n "$HF_TOKEN_ARG" ]]; then
+    echo "[*] HF token:         (set)"
+  fi
 else
   if [[ -n "$OLLAMA_MODEL" ]]; then
     echo "[*] Ollama model:     $OLLAMA_MODEL"
@@ -221,11 +238,13 @@ else
 fi
 startup_start_ts=$(date +%s)
 
-# Run remote startup in background (pass model via env for backend)
+# Run remote startup in background (pass model and optional HF token via env for backend)
 if [[ "$BACKEND" == "vllm" ]]; then
   VLLM_MODEL_ESCAPED=$(echo "$VLLM_MODEL" | sed "s/'/'\\\\''/g")
+  HF_TOKEN_ESC=""
+  [[ -n "$HF_TOKEN_ARG" ]] && HF_TOKEN_ESC="export HF_TOKEN='$(echo "$HF_TOKEN_ARG" | sed "s/'/'\\\\''/g")'; "
   ssh $SSH_OPTS "${REMOTE_USER}@${GPU_IP}" \
-    "export VLLM_MODEL='${VLLM_MODEL_ESCAPED}'; chmod +x ${REMOTE_PATH} && sudo -E ${REMOTE_PATH}" &
+    "export VLLM_MODEL='${VLLM_MODEL_ESCAPED}'; ${HF_TOKEN_ESC}chmod +x ${REMOTE_PATH} && sudo -E ${REMOTE_PATH}" &
 elif [[ -n "$OLLAMA_MODEL" ]]; then
   OLLAMA_MODEL_ESCAPED=$(echo "$OLLAMA_MODEL" | sed "s/'/'\\\\''/g")
   ssh $SSH_OPTS "${REMOTE_USER}@${GPU_IP}" \
