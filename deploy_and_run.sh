@@ -19,6 +19,7 @@ set -euo pipefail
 #                  Use --hf-token for gated models.
 #  Example: ./deploy_and_run.sh --model llama3.2:3b
 #           ./deploy_and_run.sh --vllm --model Qwen/Qwen2.5-72B-Instruct
+#           ./deploy_and_run.sh --vllm --model Qwen/Qwen3.5-122B-A10B --hf-token hf_xxx  (note: A10B not A1B0)
 #           ./deploy_and_run.sh --vllm --model Qwen/Qwen2.5-72B-Instruct --hf-token hf_xxx 192.168.1.10
 ###############################################################################
 

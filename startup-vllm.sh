@@ -74,6 +74,7 @@ sudo docker run -d \
   --device /dev/dri \
   -v "${HF_CACHE_DIR}:/root/.cache/huggingface" \
   ${HF_TOKEN:+--env "HF_TOKEN=$HF_TOKEN"} \
+  ${HF_TOKEN:+--env "HUGGING_FACE_HUB_TOKEN=$HF_TOKEN"} \
   -p "${VLLM_PORT}:8000" \
   --ipc=host \
   "$VLLM_IMAGE" \
