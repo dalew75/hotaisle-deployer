@@ -12,6 +12,10 @@ set -euo pipefail
 #  6. Runs it remotely via sudo (with a progress spinner)
 #  7. Opens a new terminal window streaming docker logs -f ollama
 #  8. Prints timing stats at the end
+#
+#  Usage: ./deploy_and_run.sh [--model <ollama_model>] [GPU_IP]
+#  Example: ./deploy_and_run.sh --model llama3.2:3b
+#           ./deploy_and_run.sh --model llama3.2:3b 192.168.1.10
 ###############################################################################
 
 REMOTE_USER="${REMOTE_USER:-hotaisle}"
@@ -20,7 +24,20 @@ LOCAL_SCRIPT="startup-amd.sh"
 KNOWN_HOSTS_FILE="${HOME}/.ssh/known_hosts"
 LAST_VM_FILE="${HOME}/.hotaisle_last_vm"
 
-# Optional argument: GPU IP address (skip provisioning if provided)
+# Parse arguments: optional --model <name>, then optional GPU_IP
+OLLAMA_MODEL=""
+while [[ $# -gt 0 ]] && [[ "$1" == -* ]]; do
+  case "$1" in
+    --model)
+      OLLAMA_MODEL="$2"
+      shift 2
+      ;;
+    *)
+      echo "[!] Unknown option: $1"
+      exit 1
+      ;;
+  esac
+done
 GPU_IP="${1:-}"
 
 # Timing helpers
@@ -33,6 +50,11 @@ startup_secs=0
 echo "------------------------------------------------------"
 echo "[*] Local startup script: $LOCAL_SCRIPT"
 echo "[*] Provided GPU IP (if any): ${GPU_IP:-<none>}"
+if [[ -n "$OLLAMA_MODEL" ]]; then
+  echo "[*] Ollama model:     $OLLAMA_MODEL"
+else
+  echo "[*] Ollama model:     (default: gpt-oss:120b from startup-amd.sh)"
+fi
 echo "------------------------------------------------------"
 
 ###############################################################################
@@ -173,9 +195,15 @@ echo "[+] Script copied (scp: ${scp_secs}s)."
 echo "[*] Running script on remote GPU (this includes model pull; may take a while)..."
 startup_start_ts=$(date +%s)
 
-# Run remote startup in background
-ssh $SSH_OPTS "${REMOTE_USER}@${GPU_IP}" \
-  "chmod +x ${REMOTE_PATH} && sudo ${REMOTE_PATH}" &
+# Run remote startup in background (pass MODEL_NAME if --model was given)
+if [[ -n "$OLLAMA_MODEL" ]]; then
+  OLLAMA_MODEL_ESCAPED=$(echo "$OLLAMA_MODEL" | sed "s/'/'\\\\''/g")
+  ssh $SSH_OPTS "${REMOTE_USER}@${GPU_IP}" \
+    "export MODEL_NAME='${OLLAMA_MODEL_ESCAPED}'; chmod +x ${REMOTE_PATH} && sudo -E ${REMOTE_PATH}" &
+else
+  ssh $SSH_OPTS "${REMOTE_USER}@${GPU_IP}" \
+    "chmod +x ${REMOTE_PATH} && sudo ${REMOTE_PATH}" &
+fi
 ssh_pid=$!
 
 # Simple spinner while the remote script is running
