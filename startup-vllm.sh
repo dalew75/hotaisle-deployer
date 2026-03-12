@@ -10,8 +10,11 @@
 #                  If comma-separated list, the first model is served (vLLM serves one per process).
 #   VLLM_PORT    - Port for vLLM API (default: 8000)
 #   VLLM_IMAGE   - Docker image (default: vllm/vllm-openai-rocm:latest)
-#   HF_CACHE_DIR - Host path for HuggingFace cache (default: /opt/vllm-hf-cache)
-#   HF_TOKEN     - Optional HuggingFace token for gated models
+#   HF_CACHE_DIR    - Host path for HuggingFace cache (default: /opt/vllm-hf-cache)
+#   HF_TOKEN       - Optional HuggingFace token for gated models
+#   VLLM_EXTRA_ARGS - Extra flags for vLLM (e.g. --quantization awq for large models)
+#                     For Qwen3.5-122B on a single 192GB GPU, use the AWQ model with:
+#                     VLLM_MODEL=QuantTrio/Qwen3.5-122B-A10B-AWQ VLLM_EXTRA_ARGS="--quantization awq"
 #
 # See: https://docs.vllm.ai/en/stable/getting_started/installation/gpu.html?device=rocm
 
@@ -21,6 +24,7 @@ VLLM_MODEL="${VLLM_MODEL:-Qwen/Qwen2.5-VL-72B-Instruct}"
 VLLM_PORT="${VLLM_PORT:-8000}"
 VLLM_IMAGE="${VLLM_IMAGE:-vllm/vllm-openai-rocm:latest}"
 HF_CACHE_DIR="${HF_CACHE_DIR:-/opt/vllm-hf-cache}"
+VLLM_EXTRA_ARGS="${VLLM_EXTRA_ARGS:-}"
 
 # If comma-separated list, use first model for vllm serve
 MODEL_TO_SERVE="${VLLM_MODEL%%,*}"
@@ -29,6 +33,7 @@ echo "[*] Model:          $MODEL_TO_SERVE"
 echo "[*] API port:       $VLLM_PORT"
 echo "[*] Docker image:   $VLLM_IMAGE"
 echo "[*] HF cache:       $HF_CACHE_DIR"
+[[ -n "$VLLM_EXTRA_ARGS" ]] && echo "[*] Extra vLLM args: $VLLM_EXTRA_ARGS"
 echo
 
 # ---- Basic ROCm sanity hint (non-fatal) ------------------------------------
@@ -78,7 +83,8 @@ sudo docker run -d \
   -p "${VLLM_PORT}:8000" \
   --ipc=host \
   "$VLLM_IMAGE" \
-  --model "$MODEL_TO_SERVE"
+  --model "$MODEL_TO_SERVE" \
+  $VLLM_EXTRA_ARGS
 
 echo "[*] Waiting for vLLM to start..."
 sleep 10

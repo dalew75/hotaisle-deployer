@@ -13,14 +13,14 @@ set -euo pipefail
 #  7. Opens a new terminal window for logs (docker logs -f ollama or vllm)
 #  8. Prints timing stats at the end
 #
-#  Usage: ./deploy_and_run.sh [--vllm] [--model <model>] [--hf-token <token>] [GPU_IP]
+#  Usage: ./deploy_and_run.sh [--vllm] [--model <model>] [--hf-token <token>] [--vllm-extra-args <args>] [GPU_IP]
 #  Without --vllm: deploy Ollama (--model is Ollama model, e.g. llama3.2:3b).
-#  With --vllm:    deploy vLLM (--model must be a Hugging Face ID, e.g. Qwen/Qwen2.5-72B-Instruct).
-#                  Use --hf-token for gated models.
+#  With --vllm:    deploy vLLM (--model must be a Hugging Face ID).
+#                  Use --hf-token for gated models. Use --vllm-extra-args for e.g. --quantization awq.
+#                  For Qwen3.5-122B on one 192GB GPU use AWQ: --model QuantTrio/Qwen3.5-122B-A10B-AWQ --vllm-extra-args "--quantization awq"
 #  Example: ./deploy_and_run.sh --model llama3.2:3b
 #           ./deploy_and_run.sh --vllm --model Qwen/Qwen2.5-72B-Instruct
-#           ./deploy_and_run.sh --vllm --model Qwen/Qwen3.5-122B-A10B --hf-token hf_xxx  (note: A10B not A1B0)
-#           ./deploy_and_run.sh --vllm --model Qwen/Qwen2.5-72B-Instruct --hf-token hf_xxx 192.168.1.10
+#           ./deploy_and_run.sh --vllm --model QuantTrio/Qwen3.5-122B-A10B-AWQ --vllm-extra-args "--quantization awq" --hf-token hf_xxx
 ###############################################################################
 
 REMOTE_USER="${REMOTE_USER:-hotaisle}"
@@ -28,10 +28,11 @@ REMOTE_PATH="/home/${REMOTE_USER}/start.sh"
 KNOWN_HOSTS_FILE="${HOME}/.ssh/known_hosts"
 LAST_VM_FILE="${HOME}/.hotaisle_last_vm"
 
-# Parse arguments: --vllm, --model <name>, --hf-token <token>, then optional GPU_IP
+# Parse arguments: --vllm, --model <name>, --hf-token <token>, --vllm-extra-args <args>, then optional GPU_IP
 BACKEND="ollama"
 MODEL_ARG=""
 HF_TOKEN_ARG=""
+VLLM_EXTRA_ARGS_ARG=""
 while [[ $# -gt 0 ]] && [[ "$1" == -* ]]; do
   case "$1" in
     --vllm)
@@ -44,6 +45,10 @@ while [[ $# -gt 0 ]] && [[ "$1" == -* ]]; do
       ;;
     --hf-token)
       HF_TOKEN_ARG="$2"
+      shift 2
+      ;;
+    --vllm-extra-args)
+      VLLM_EXTRA_ARGS_ARG="$2"
       shift 2
       ;;
     *)
@@ -87,6 +92,9 @@ if [[ "$BACKEND" == "vllm" ]]; then
   echo "[*] vLLM model:       $VLLM_MODEL"
   if [[ -n "$HF_TOKEN_ARG" ]]; then
     echo "[*] HF token:         (set)"
+  fi
+  if [[ -n "$VLLM_EXTRA_ARGS_ARG" ]]; then
+    echo "[*] vLLM extra args:  $VLLM_EXTRA_ARGS_ARG"
   fi
 else
   if [[ -n "$OLLAMA_MODEL" ]]; then
@@ -239,13 +247,15 @@ else
 fi
 startup_start_ts=$(date +%s)
 
-# Run remote startup in background (pass model and optional HF token via env for backend)
+# Run remote startup in background (pass model, optional HF token, optional vLLM extra args)
 if [[ "$BACKEND" == "vllm" ]]; then
   VLLM_MODEL_ESCAPED=$(echo "$VLLM_MODEL" | sed "s/'/'\\\\''/g")
   HF_TOKEN_ESC=""
   [[ -n "$HF_TOKEN_ARG" ]] && HF_TOKEN_ESC="export HF_TOKEN='$(echo "$HF_TOKEN_ARG" | sed "s/'/'\\\\''/g")'; "
+  VLLM_EXTRA_ESC=""
+  [[ -n "$VLLM_EXTRA_ARGS_ARG" ]] && VLLM_EXTRA_ESC="export VLLM_EXTRA_ARGS='$(echo "$VLLM_EXTRA_ARGS_ARG" | sed "s/'/'\\\\''/g")'; "
   ssh $SSH_OPTS "${REMOTE_USER}@${GPU_IP}" \
-    "export VLLM_MODEL='${VLLM_MODEL_ESCAPED}'; ${HF_TOKEN_ESC}chmod +x ${REMOTE_PATH} && sudo -E ${REMOTE_PATH}" &
+    "export VLLM_MODEL='${VLLM_MODEL_ESCAPED}'; ${HF_TOKEN_ESC}${VLLM_EXTRA_ESC}chmod +x ${REMOTE_PATH} && sudo -E ${REMOTE_PATH}" &
 elif [[ -n "$OLLAMA_MODEL" ]]; then
   OLLAMA_MODEL_ESCAPED=$(echo "$OLLAMA_MODEL" | sed "s/'/'\\\\''/g")
   ssh $SSH_OPTS "${REMOTE_USER}@${GPU_IP}" \
