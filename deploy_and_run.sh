@@ -8,28 +8,34 @@ set -euo pipefail
 #  2. Extracts SSH IP from the HotAisle response
 #  3. Stores last VM name in ~/.hotaisle_last_vm
 #  4. Cleans host keys for that IP
-#  5. Uploads startup-amd.sh to the VM
+#  5. Uploads startup script (Ollama or vLLM) to the VM
 #  6. Runs it remotely via sudo (with a progress spinner)
-#  7. Opens a new terminal window streaming docker logs -f ollama
+#  7. Opens a new terminal window for logs (docker logs -f ollama or vllm)
 #  8. Prints timing stats at the end
 #
-#  Usage: ./deploy_and_run.sh [--model <ollama_model>] [GPU_IP]
+#  Usage: ./deploy_and_run.sh [--vllm] [--model <model>] [GPU_IP]
+#  Without --vllm: deploy Ollama (--model is Ollama model, default gpt-oss:120b).
+#  With --vllm:    deploy vLLM (--model is HuggingFace model, default Qwen/Qwen2.5-VL-72B-Instruct).
 #  Example: ./deploy_and_run.sh --model llama3.2:3b
-#           ./deploy_and_run.sh --model llama3.2:3b 192.168.1.10
+#           ./deploy_and_run.sh --vllm --model Qwen/Qwen2.5-VL-7B-Instruct 192.168.1.10
 ###############################################################################
 
 REMOTE_USER="${REMOTE_USER:-hotaisle}"
 REMOTE_PATH="/home/${REMOTE_USER}/start.sh"
-LOCAL_SCRIPT="startup-amd.sh"
 KNOWN_HOSTS_FILE="${HOME}/.ssh/known_hosts"
 LAST_VM_FILE="${HOME}/.hotaisle_last_vm"
 
-# Parse arguments: optional --model <name>, then optional GPU_IP
-OLLAMA_MODEL=""
+# Parse arguments: --vllm, --model <name>, then optional GPU_IP
+BACKEND="ollama"
+MODEL_ARG=""
 while [[ $# -gt 0 ]] && [[ "$1" == -* ]]; do
   case "$1" in
+    --vllm)
+      BACKEND="vllm"
+      shift
+      ;;
     --model)
-      OLLAMA_MODEL="$2"
+      MODEL_ARG="$2"
       shift 2
       ;;
     *)
@@ -40,6 +46,17 @@ while [[ $# -gt 0 ]] && [[ "$1" == -* ]]; do
 done
 GPU_IP="${1:-}"
 
+# Set script and model by backend
+if [[ "$BACKEND" == "vllm" ]]; then
+  LOCAL_SCRIPT="startup-vllm.sh"
+  VLLM_MODEL="${MODEL_ARG:-Qwen/Qwen2.5-VL-72B-Instruct}"
+  OLLAMA_MODEL=""
+else
+  LOCAL_SCRIPT="startup-amd.sh"
+  OLLAMA_MODEL="${MODEL_ARG:-}"
+  VLLM_MODEL=""
+fi
+
 # Timing helpers
 script_start_ts=$(date +%s)
 provision_secs=0
@@ -48,17 +65,22 @@ scp_secs=0
 startup_secs=0
 
 echo "------------------------------------------------------"
-echo "[*] Local startup script: $LOCAL_SCRIPT"
-echo "[*] Provided GPU IP (if any): ${GPU_IP:-<none>}"
-if [[ -n "$OLLAMA_MODEL" ]]; then
-  echo "[*] Ollama model:     $OLLAMA_MODEL"
+echo "[*] Backend:         $BACKEND"
+echo "[*] Local script:    $LOCAL_SCRIPT"
+echo "[*] Provided GPU IP: ${GPU_IP:-<none>}"
+if [[ "$BACKEND" == "vllm" ]]; then
+  echo "[*] vLLM model:       $VLLM_MODEL"
 else
-  echo "[*] Ollama model:     (default: gpt-oss:120b from startup-amd.sh)"
+  if [[ -n "$OLLAMA_MODEL" ]]; then
+    echo "[*] Ollama model:     $OLLAMA_MODEL"
+  else
+    echo "[*] Ollama model:     (default: gpt-oss:120b from startup-amd.sh)"
+  fi
 fi
 echo "------------------------------------------------------"
 
 ###############################################################################
-#  Ensure startup-amd.sh exists locally
+#  Ensure startup script exists locally
 ###############################################################################
 if [[ ! -f "$LOCAL_SCRIPT" ]]; then
   echo "[!] ERROR: Local script '$LOCAL_SCRIPT' not found."
@@ -179,7 +201,7 @@ ssh_wait_secs=$((ssh_wait_end_ts - ssh_wait_start_ts))
 echo "[+] Remote SSH is ready (waited ${ssh_wait_secs}s)."
 
 ###############################################################################
-#  Upload startup-amd.sh
+#  Upload startup script
 ###############################################################################
 echo "[*] Copying $LOCAL_SCRIPT to $GPU_IP:$REMOTE_PATH ..."
 scp_start_ts=$(date +%s)
@@ -192,11 +214,19 @@ echo "[+] Script copied (scp: ${scp_secs}s)."
 ###############################################################################
 #  Run remote setup (with progress indicator)
 ###############################################################################
-echo "[*] Running script on remote GPU (this includes model pull; may take a while)..."
+if [[ "$BACKEND" == "vllm" ]]; then
+  echo "[*] Running script on remote GPU (vLLM install and serve; may take a while)..."
+else
+  echo "[*] Running script on remote GPU (this includes model pull; may take a while)..."
+fi
 startup_start_ts=$(date +%s)
 
-# Run remote startup in background (pass MODEL_NAME if --model was given)
-if [[ -n "$OLLAMA_MODEL" ]]; then
+# Run remote startup in background (pass model via env for backend)
+if [[ "$BACKEND" == "vllm" ]]; then
+  VLLM_MODEL_ESCAPED=$(echo "$VLLM_MODEL" | sed "s/'/'\\\\''/g")
+  ssh $SSH_OPTS "${REMOTE_USER}@${GPU_IP}" \
+    "export VLLM_MODEL='${VLLM_MODEL_ESCAPED}'; chmod +x ${REMOTE_PATH} && sudo -E ${REMOTE_PATH}" &
+elif [[ -n "$OLLAMA_MODEL" ]]; then
   OLLAMA_MODEL_ESCAPED=$(echo "$OLLAMA_MODEL" | sed "s/'/'\\\\''/g")
   ssh $SSH_OPTS "${REMOTE_USER}@${GPU_IP}" \
     "export MODEL_NAME='${OLLAMA_MODEL_ESCAPED}'; chmod +x ${REMOTE_PATH} && sudo -E ${REMOTE_PATH}" &
@@ -226,17 +256,28 @@ echo "[✔] Remote deployment and startup script completed."
 echo "------------------------------------------------------"
 
 ###############################################################################
-#  Open a new terminal window for docker logs -f ollama
+#  Open a new terminal window for logs
 ###############################################################################
 if command -v gnome-terminal >/dev/null 2>&1; then
-  echo "[*] Opening new terminal for 'docker logs -f ollama'..."
-  gnome-terminal -- bash -lc \
-    "ssh $SSH_OPTS ${REMOTE_USER}@${GPU_IP} 'docker logs -f ollama'; \
-     echo; echo 'Ollama logs ended. Press Enter to close.'; read"
+  if [[ "$BACKEND" == "vllm" ]]; then
+    echo "[*] Opening new terminal for 'docker logs -f vllm'..."
+    gnome-terminal -- bash -lc \
+      "ssh $SSH_OPTS ${REMOTE_USER}@${GPU_IP} 'docker logs -f vllm'; \
+       echo; echo 'vLLM logs ended. Press Enter to close.'; read"
+  else
+    echo "[*] Opening new terminal for 'docker logs -f ollama'..."
+    gnome-terminal -- bash -lc \
+      "ssh $SSH_OPTS ${REMOTE_USER}@${GPU_IP} 'docker logs -f ollama'; \
+       echo; echo 'Ollama logs ended. Press Enter to close.'; read"
+  fi
 else
   echo "[!] gnome-terminal not found."
   echo "    To watch logs manually, run:"
-  echo "      ssh ${REMOTE_USER}@${GPU_IP} 'docker logs -f ollama'"
+  if [[ "$BACKEND" == "vllm" ]]; then
+    echo "      ssh ${REMOTE_USER}@${GPU_IP} 'docker logs -f vllm'"
+  else
+    echo "      ssh ${REMOTE_USER}@${GPU_IP} 'docker logs -f ollama'"
+  fi
 fi
 
 ###############################################################################
