@@ -5,16 +5,16 @@
 # Usage:
 #   VLLM_MODEL="Qwen/Qwen2.5-VL-72B-Instruct" ./startup-vllm.sh
 #
+# Launches via: vllm serve <model> --port 8000 --tensor-parallel-size 1 --max-model-len 262144
+#               --reasoning-parser qwen3 --enable-auto-tool-choice --tool-call-parser qwen3_coder
+#
 # Optional environment overrides:
-#   VLLM_MODEL   - Model to serve (default: Qwen/Qwen2.5-VL-72B-Instruct)
-#                  If comma-separated list, the first model is served (vLLM serves one per process).
-#   VLLM_PORT    - Port for vLLM API (default: 8000)
-#   VLLM_IMAGE   - Docker image (default: vllm/vllm-openai-rocm:latest)
-#   HF_CACHE_DIR    - Host path for HuggingFace cache (default: /opt/vllm-hf-cache)
+#   VLLM_MODEL     - Model to serve (default: Qwen/Qwen2.5-VL-72B-Instruct). Passed as positional arg.
+#   VLLM_PORT      - Host port for API (default: 8000); container always listens on 8000.
+#   VLLM_IMAGE     - Docker image (default: vllm/vllm-openai-rocm:latest)
+#   HF_CACHE_DIR   - Host path for HuggingFace cache (default: /opt/vllm-hf-cache)
 #   HF_TOKEN       - Optional HuggingFace token for gated models
-#   VLLM_EXTRA_ARGS - Extra flags for vLLM (e.g. --quantization awq for large models)
-#                     For Qwen3.5-122B on a single 192GB GPU, use the AWQ model with:
-#                     VLLM_MODEL=QuantTrio/Qwen3.5-122B-A10B-AWQ VLLM_EXTRA_ARGS="--quantization awq"
+#   VLLM_EXTRA_ARGS - Extra flags appended after the fixed flags (e.g. --quantization awq)
 #
 # See: https://docs.vllm.ai/en/stable/getting_started/installation/gpu.html?device=rocm
 
@@ -68,7 +68,8 @@ if sudo docker ps -a --format '{{.Names}}' | grep -q '^vllm$'; then
 fi
 
 # ---- Run vLLM container (ROCm / AMD) ---------------------------------------
-# Flags per official vLLM ROCm Docker docs
+# Image entrypoint is "vllm serve"; pass model as positional, then flags.
+# Container listens on 8000; host port is VLLM_PORT via -p mapping.
 echo "[*] Starting vLLM container: $MODEL_TO_SERVE on port $VLLM_PORT ..."
 sudo docker run -d \
   --name vllm \
@@ -83,7 +84,13 @@ sudo docker run -d \
   -p "${VLLM_PORT}:8000" \
   --ipc=host \
   "$VLLM_IMAGE" \
-  --model "$MODEL_TO_SERVE" \
+  "$MODEL_TO_SERVE" \
+  --port 8000 \
+  --tensor-parallel-size 1 \
+  --max-model-len 262144 \
+  --reasoning-parser qwen3 \
+  --enable-auto-tool-choice \
+  --tool-call-parser qwen3_coder \
   $VLLM_EXTRA_ARGS
 
 echo "[*] Waiting for vLLM to start..."
