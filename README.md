@@ -1,221 +1,98 @@
-# HotAisle GPU VM Deployment Tools
+# hotaisle-deployer
 
-A collection of bash scripts for automating the deployment and management of GPU virtual machines on the HotAisle cloud platform, specifically configured for running large language models (LLMs) via Ollama.
+Bash scripts that rent an AMD MI300X GPU VM on [HotAisle](https://hotaisle.xyz), serve one or more
+models on it with **Ollama** or **vLLM** (OpenAI-compatible API), and delete the VM when you're done.
 
-## Overview
+It is the HotAisle provider adapter for `ai-gateway` (the hub that lists AI providers with their
+attributes: local, private, cost, capabilities). It works fine on its own too.
 
-This project provides a streamlined workflow for:
-- **Provisioning** GPU VMs on HotAisle (AMD MI300X)
-- **Deploying** Ollama with the `gpt-oss:120b` model
-- **Managing** VM lifecycle (provision, deploy, destroy)
-
-The scripts handle the entire pipeline from VM creation to model serving, including SSH setup, Docker configuration, and model downloads.
+> **Costs money.** A 1× MI300X VM is billed while it exists (about $2–3/hr as of 2026-11; check
+> HotAisle's pricing). Always run `./destroy_vm.sh` when you're done.
 
 ## Scripts
 
-### `deploy_and_run.sh` - Main Deployment Script
+| Script | Runs where | What it does |
+|---|---|---|
+| `deploy_and_run.sh` | your machine | Provisions a VM (unless you pass an IP), uploads the scripts below, runs them, prints the endpoint and timings |
+| `destroy_vm.sh` | your machine | Deletes a VM by name (default: the last one, from `~/.hotaisle_last_vm`) |
+| `secure-net.sh` | the VM | Joins the VM to your tailnet and turns on ufw (skipped with `--public`) |
+| `startup-ollama.sh` | the VM | Docker + `ollama/ollama:rocm`, pulls the model(s), one port |
+| `startup-vllm.sh` | the VM | Docker + `vllm/vllm-openai-rocm`, one container per model on ports PORT, PORT+1, … |
+| `Dockerfile.vllm-rocm-gemma4-hotfix` | a Docker host | vLLM ROCm image with a one-line fix for Gemma 4 checkpoints (`embed_tokens.biases`) |
 
-The primary script that orchestrates the entire deployment process.
-
-**Features:**
-- Optionally provisions a new HotAisle VM (if no IP provided)
-- Extracts SSH IP from HotAisle API response
-- Cleans SSH host keys for seamless reconnection
-- Uploads startup script to the remote VM
-- Runs remote setup with progress indicators
-- Opens separate terminal window for Ollama logs
-- Displays comprehensive timing statistics
-
-**Usage:**
-```bash
-# Provision new VM and deploy
-./deploy_and_run.sh
-
-# Deploy to existing VM
-./deploy_and_run.sh <GPU_IP_ADDRESS>
-```
-
-**Environment Variables:**
-- `HOTAISLE_TEAM_NAME` - Your HotAisle team name (required for provisioning)
-- `HOTAISLE_TOKEN` - HotAisle API authentication token (required for provisioning)
-- `HOTAISLE_USER_DATA_URL` - Optional cloud-init user-data URL
-- `REMOTE_USER` - SSH username for remote VM (default: `hotaisle`)
-
-**What it does:**
-1. Provisions VM with AMD MI300X GPU (13 CPU cores, 240GB RAM, 12TB disk)
-2. Waits for SSH connectivity
-3. Uploads `startup-amd.sh` to the VM
-4. Executes remote setup (Docker, Ollama, model pull)
-5. Opens Ollama logs in new terminal
-6. Displays timing summary
-
-### `destroy_vm.sh` - VM Deletion Script
-
-Deletes a HotAisle VM by name via the API.
-
-**Usage:**
-```bash
-./destroy_vm.sh <vm-name>
-```
-
-**Example:**
-```bash
-./destroy_vm.sh enc1-gpuvm028
-```
-
-**Environment Variables:**
-- `HOTAISLE_TEAM_NAME` - Your HotAisle team name (required)
-- `HOTAISLE_TOKEN` - HotAisle API authentication token (required)
-
-**Features:**
-- Validates HTTP 204 response for successful deletion
-- Displays error details if deletion fails
-- Clear success/failure messaging
-
-### `startup-amd.sh` - AMD GPU Setup Script
-
-Configures Ollama on AMD GPUs using ROCm. This script is uploaded to and executed on the remote VM.
-
-**Features:**
-- Installs Docker if not present
-- Pulls Ollama ROCm image (`ollama/ollama:rocm`)
-- Configures GPU access via `/dev/kfd` and `/dev/dri`
-- Pulls `gpt-oss:120b` model
-- Exposes OpenAI-compatible API endpoint
-
-**Environment Variables:**
-- `MODEL_NAME` - Model to pull (default: `gpt-oss:120b`)
-- `OLLAMA_IMAGE` - Ollama Docker image (default: `ollama/ollama:rocm`)
-- `DATA_DIR` - Data directory (default: `/opt/ollama`)
-- `PORT` - API port (default: `11434`)
-
-**Target:** AMD MI300X GPUs with ROCm support
-
-## Prerequisites
-
-### Local Machine
-- Bash shell
-- `curl` - For API requests
-- `jq` - For JSON parsing
-- `ssh` / `scp` - For remote access
-- Terminal emulator (optional):
-  - Linux/GNOME: `gnome-terminal` (auto-detected)
-  - macOS: `Terminal.app` or `iTerm2` (manual command provided)
-  - Windows: WSL or Git Bash (manual command provided)
-  - If no terminal emulator is found, the script will display the manual command to run
-
-### HotAisle Account
-- HotAisle team name
-- HotAisle API token
-- SSH access configured (public key authentication)
-
-### Remote VM Requirements
-- Ubuntu/Debian-based Linux
-- Internet connectivity
-- Sudo access for `hotaisle` user
-- GPU drivers (ROCm for AMD)
-
-## Quick Start
-
-1. **Set up environment variables:**
-   ```bash
-   export HOTAISLE_TEAM_NAME="your-team-name"
-   export HOTAISLE_TOKEN="your-api-token"
-   # Optional: if your HotAisle VMs use a different SSH username
-   export REMOTE_USER="hotaisle"  # default
-   ```
-
-2. **Make scripts executable:**
-   ```bash
-   chmod +x deploy_and_run.sh destroy_vm.sh startup-amd.sh
-   ```
-
-3. **Deploy to a new VM:**
-   ```bash
-   ./deploy_and_run.sh
-   ```
-
-4. **When done, destroy the VM:**
-   ```bash
-   # VM name is stored in ~/.hotaisle_last_vm
-   ./destroy_vm.sh $(cat ~/.hotaisle_last_vm)
-   ```
-
-## Workflow Example
+## Quick start
 
 ```bash
-# 1. Provision and deploy
-./deploy_and_run.sh
+export HOTAISLE_TEAM_NAME="your-team"
+export HOTAISLE_TOKEN="your-api-token"
+export TS_AUTHKEY="tskey-auth-..."   # ephemeral, pre-authorized Tailscale key (e.g. tag:gpu)
 
-# Output shows:
-# - VM provisioning progress
-# - SSH connection status
-# - Remote setup progress (with spinner)
-# - Ollama logs open in new terminal
-# - Timing summary
+# Ollama, default model gpt-oss:120b
+./deploy_and_run.sh --backend ollama
 
-# 2. Monitor logs
-# - Check the separate terminal window
-# - Or manually: ssh hotaisle@<IP> 'docker logs -f ollama'
+# vLLM, a Hugging Face model
+./deploy_and_run.sh --backend vllm --model Qwen/Qwen2.5-72B-Instruct
 
-# 3. Clean up
-./destroy_vm.sh $(cat ~/.hotaisle_last_vm)
+# Deploy to a VM you already have
+./deploy_and_run.sh --backend ollama --model llama3.2:3b <GPU_IP>
+
+# Done: delete the VM (stops billing)
+./destroy_vm.sh
 ```
 
-## VM Specifications
+At the end it prints the endpoint, e.g. `http://gpu-hotaisle-<vm>:8000/v1`. Any non-empty API key works.
 
-The default VM configuration when provisioning:
-- **CPU:** 1x Intel Xeon Platinum 8470 (13 cores @ 2.0 GHz)
-- **GPU:** 1x AMD MI300X
-- **RAM:** 240 GB
-- **Disk:** 12 TB
-- **OS:** Ubuntu (via HotAisle default)
+## Network: tailnet only by default
 
-## Model Information
+The model API has no authentication of its own. So by default the VM joins your
+[Tailscale](https://tailscale.com) tailnet and the API ports are published **on the tailnet IP only**;
+the public IP only has SSH open. `deploy_and_run.sh` refuses to start without `TS_AUTHKEY`.
 
-- **Model:** `gpt-oss:120b` (120 billion parameters)
-- **API:** OpenAI-compatible endpoint at `http://<VM_IP>:11434/v1`
-- **Context Length:** 4096 tokens
-- **Features:** Streaming, system messages, temperature control
+- Use an **ephemeral** auth key, so the machine leaves the tailnet when the VM is deleted, and a tag
+  (e.g. `tag:gpu`) so your tailnet ACL can decide which of your machines may reach it.
+- `TS_HOSTNAME` sets the machine name (default `gpu-hotaisle-<vm-name>`).
+- `--public` skips all of this and publishes on every interface with no auth. Anyone who finds the IP
+  can use the GPU and read prompts. Only for throwaway tests.
+- Secrets (`TS_AUTHKEY`, `--hf-token`) are sent in a mode-600 env file that the VM deletes right after
+  reading it. They never appear on the SSH command line.
 
-## File Locations
+## Options (`deploy_and_run.sh`)
 
-- **Last VM name:** `~/.hotaisle_last_vm` (created automatically)
-- **SSH known_hosts:** `~/.ssh/known_hosts` (cleaned automatically)
-- **Remote script path:** `/home/hotaisle/start.sh`
-- **Ollama data:** `/opt/ollama` (on remote VM)
+| Option | Meaning |
+|---|---|
+| `--backend ollama\|vllm` | Required |
+| `--model a,b` | Ollama tags or Hugging Face IDs, comma-separated. Defaults: `gpt-oss:120b` / `Qwen/Qwen2.5-VL-72B-Instruct` |
+| `--port N` | Starting port (default 8000) |
+| `--public` | No Tailscale; publish on the public IP (no auth) |
+| `--hf-token T` | Hugging Face token for gated models (vLLM) |
+| `--vllm-max-model-len N` | Context length (default 131072) |
+| `--vllm-trust-remote-code` / `--no-vllm-trust-remote-code` | Default on |
+| `--vllm-no-qwen-tool-stack` | Drop the Qwen3 reasoning/tool parser flags (for non-Qwen models) |
+| `--vllm-disable-reasoning` | `enable_thinking: false` in the chat template |
+| `--vllm-image ref` | Docker image (default `vllm/vllm-openai-rocm:latest`, pulled every deploy) |
+| `--vllm-extra-args "…"` | Passed through last |
 
-## Troubleshooting
+Environment: `HOTAISLE_TEAM_NAME`, `HOTAISLE_TOKEN` (provisioning), `TS_AUTHKEY`, `TS_HOSTNAME`,
+`REMOTE_USER` (default `hotaisle`), `HOTAISLE_USER_DATA_URL` (cloud-init).
 
-### SSH Connection Issues
-- Script automatically cleans old host keys
-- Check that your SSH public key is configured in HotAisle
-- Verify VM is reachable: `ping <VM_IP>`
+## VM spec requested
 
-### Model Pull Fails
-- Check internet connectivity on remote VM
-- Verify GPU is accessible: `docker logs ollama`
-- Model download can take 30+ minutes for 120B model
-
-### API Endpoint Not Accessible
-- Verify Ollama is running: `ssh hotaisle@<IP> 'docker ps'`
-- Check API endpoint: `curl http://<VM_IP>:11434/v1/models`
-- Ensure firewall allows port 11434
-
-### VM Provisioning Fails
-- Verify `HOTAISLE_TEAM_NAME` and `HOTAISLE_TOKEN` are set
-- Check API token permissions
-- Review HotAisle API response for error details
+1× AMD MI300X (192 GB HBM3), 13 Xeon Platinum 8470 cores, 240 GB RAM, 12 TB disk (`deploy_and_run.sh`).
 
 ## Notes
 
-- The `gpt-oss:120b` model is large (~240GB) and takes significant time to download
-- First-time model pull may take 30-60 minutes depending on network speed
-- VM provisioning typically takes 1-3 minutes
-- Scripts use `set -euo pipefail` for strict error handling
-- All timing information is displayed at the end for performance analysis
+- Model downloads are the slow part: `gpt-oss:120b` (~65 GB) or a 70B model in full precision (~140 GB)
+  can take 10–60 minutes. The spinner only says the SSH session is still open.
+- With several Ollama models, they share one port; with vLLM, each model gets its own container and port.
+- AMD/ROCm only. Some new models need a newer or patched vLLM image (see the Gemma 4 Dockerfile).
+- Logs: `ssh hotaisle@<IP> 'docker logs -f ollama'` (or `vllm`, `vllm-<port>`). On GNOME a terminal
+  opens with them automatically.
+
+## Docs
+
+- `AGENTS.md`: rules for coding agents working here.
+- `docs/BACKLOG.md`: planned work. `docs/TIMELINE.md`: history. `SECURITY-LOG.md`: security changes.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
+MIT, see [LICENSE](LICENSE).
