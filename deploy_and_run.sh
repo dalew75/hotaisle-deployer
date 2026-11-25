@@ -33,6 +33,10 @@ set -euo pipefail
 #  --public: skip Tailscale and publish on all interfaces (no auth: anyone with the IP can use it).
 #  Secrets (TS_AUTHKEY, HF token) go to the VM in a mode-600 env file that is deleted after it is read,
 #  never on the SSH command line.
+#
+#  Timeouts (env): SSH_TIMEOUT (default 600 s) for the VM to accept SSH; STARTUP_TIMEOUT (default 3600 s)
+#  for the remote setup incl. image and model pulls. On a timeout the script exits non-zero and says how to
+#  delete the VM (idle_stop.sh also deletes a recorded VM whose API never comes up).
 #  Example: ./deploy_and_run.sh --backend ollama --model llama3.2:3b
 #           ./deploy_and_run.sh --backend ollama --model "llama3.2:3b,codellama:7b" --port 8000
 #           ./deploy_and_run.sh --backend vllm --model Qwen/Qwen2.5-72B-Instruct
@@ -45,6 +49,20 @@ REMOTE_USER="${REMOTE_USER:-hotaisle}"
 REMOTE_PATH="/home/${REMOTE_USER}/start.sh"
 KNOWN_HOSTS_FILE="${HOME}/.ssh/known_hosts"
 LAST_VM_FILE="${HOME}/.hotaisle_last_vm"
+SSH_TIMEOUT="${SSH_TIMEOUT:-600}"
+STARTUP_TIMEOUT="${STARTUP_TIMEOUT:-3600}"
+[[ "$SSH_TIMEOUT" =~ ^[0-9]+$ && "$STARTUP_TIMEOUT" =~ ^[0-9]+$ ]] || {
+  echo "[!] ERROR: SSH_TIMEOUT and STARTUP_TIMEOUT must be whole seconds."; exit 1; }
+
+# What to tell the user when we give up on a VM that may still be billing
+vm_left_running() {
+  if [[ -n "${VM_NAME:-}" ]]; then
+    echo "    VM '${VM_NAME}' is still running and billing. Delete it: ./destroy_vm.sh ${VM_NAME}"
+    echo "    (idle_stop.sh deletes it on its own once it counts as never up / idle.)"
+  else
+    echo "    The machine at ${GPU_IP} was not created by this run; nothing to delete here."
+  fi
+}
 
 # Parse arguments: --backend, --model, --port, vLLM options, then optional GPU_IP
 BACKEND=""
@@ -366,14 +384,19 @@ fi
 ###############################################################################
 #  SSH connection options
 ###############################################################################
-SSH_OPTS="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=5"
+SSH_OPTS="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 -o ServerAliveInterval=30 -o ServerAliveCountMax=4"
 
 ###############################################################################
 #  Wait for VM to be reachable
 ###############################################################################
 echo "[*] Checking if $GPU_IP is reachable via SSH..."
 ssh_wait_start_ts=$(date +%s)
-until ssh $SSH_OPTS "${REMOTE_USER}@${GPU_IP}" "echo connected" &>/dev/null; do
+until ssh $SSH_OPTS -o BatchMode=yes "${REMOTE_USER}@${GPU_IP}" "echo connected" &>/dev/null; do
+  if (( $(date +%s) - ssh_wait_start_ts >= SSH_TIMEOUT )); then
+    echo "[!] ERROR: ${GPU_IP} did not accept SSH within ${SSH_TIMEOUT}s (SSH_TIMEOUT)."
+    vm_left_running
+    exit 1
+  fi
   echo "[-] Not ready yet... retrying in 3 seconds."
   sleep 3
 done
@@ -460,12 +483,27 @@ ssh_pid=$!
 spin='-\|/'
 i=0
 while kill -0 "$ssh_pid" >/dev/null 2>&1; do
+  if (( $(date +%s) - startup_start_ts >= STARTUP_TIMEOUT )); then
+    kill "$ssh_pid" 2>/dev/null || true
+    printf "\n"
+    echo "[!] ERROR: remote setup did not finish within ${STARTUP_TIMEOUT}s (STARTUP_TIMEOUT)."
+    echo "    It may still be pulling images or models on the VM: ssh ${REMOTE_USER}@${GPU_IP}"
+    vm_left_running
+    exit 1
+  fi
   printf "\r[remote] Working... %s" "${spin:i++%${#spin}:1}"
   sleep 1
 done
 
 # Wait for SSH to actually finish, capture exit code
-wait "$ssh_pid"
+startup_status=0
+wait "$ssh_pid" || startup_status=$?
+if [[ "$startup_status" -ne 0 ]]; then
+  printf "\n"
+  echo "[!] ERROR: remote setup failed (exit ${startup_status}); see the output above."
+  vm_left_running
+  exit 1
+fi
 startup_end_ts=$(date +%s)
 startup_secs=$((startup_end_ts - startup_start_ts))
 printf "\r[remote] Startup complete.%-20s\n" ""

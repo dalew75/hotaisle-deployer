@@ -57,6 +57,13 @@ the public IP only has SSH open. `deploy_and_run.sh` refuses to start without `T
 - Secrets (`TS_AUTHKEY`, `--hf-token`) are sent in a mode-600 env file that the VM deletes right after
   reading it. They never appear on the SSH command line.
 
+## Timeouts
+
+`deploy_and_run.sh` gives up when the VM doesn't accept SSH within `SSH_TIMEOUT` (default 600 s) or the remote
+setup (image and model pulls included) doesn't finish within `STARTUP_TIMEOUT` (default 3600 s). It exits
+non-zero and prints the `destroy_vm.sh` line for the VM, which is still billing; `idle_stop.sh` also deletes it
+once it counts as never up. Raise `STARTUP_TIMEOUT` for very large models.
+
 ## Idle auto-stop
 
 `idle_stop.sh` runs from cron on your machine every 5 minutes and deletes a VM that `deploy_and_run.sh`
