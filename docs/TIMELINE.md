@@ -41,3 +41,5 @@ Format, one line per finished task, newest last:
 - 2026-11-25 · test · HA-101 retried on DigitalOcean (tailnet mode added there): RTX 6000 Ada create removed by DO after 7 s (no capacity); nothing ran · HA-101 · pending
 - 2026-11-25 · test · tailnet-only bind verified on a DigitalOcean H100 (ams3, ~7 min): API on tailnet only, public port refused, droplet and node gone after destroy; HotAisle run still pending · HA-101 · see SECURITY-LOG
 - 2026-11-25 · feat · HA-103 idle auto-stop from the workstation (cron, 30 min idle / 4 h cap); D2 = (b) decided · HA-103 D2 · 60a9fcb
+- 2026-11-25 · fix · HA-109 SSH and remote-setup timeouts, failed setup reported · HA-109 · b343f0f
+- 2026-11-25 · chore · HA-111 shellcheck clean (0.9.0) · HA-111 · 24c725a

@@ -144,7 +144,7 @@ UX · **P2** · Proposed · S
 - Print the log command (and offer `--logs` to follow in the same terminal) instead of opening a window, so it works headless and from ai-gateway.
 
 #### HA-109 Timeouts: SSH wait and model pull
-Bug · **P1** · Proposed · S
+Bug · **P1** · Done (b343f0f) · S
 - See section C.
 
 #### HA-110 Readiness check
@@ -152,7 +152,7 @@ Feature · **P1** · Proposed · S
 - After the startup script, poll `/v1/models` over the tailnet until it answers (with a timeout) and only then print "ready".
 
 #### HA-111 shellcheck clean
-Chore · **P2** · Proposed · S
+Chore · **P2** · Done (24c725a, shellcheck 0.9.0) · S
 - Run shellcheck on every script and fix warnings (not run on 2026-11-25: not installed).
 
 #### HA-112 VM size choice
