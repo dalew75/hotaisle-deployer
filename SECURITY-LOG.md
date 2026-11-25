@@ -12,9 +12,9 @@ verified, what's still pending.
 - **Fix:** `deploy_and_run.sh` now checks availability before creating anything (exit 2, "nothing created or
   billed"), prints HotAisle's message when a reply isn't JSON, and only writes `~/.hotaisle_last_vm` once a VM
   name comes back. Verified: rerun stops at the capacity check (exit 2); non-JSON is still caught.
-- **Observed:** the team "Dale's Team" has a second member added 2026-01-25 with the `operator` role (can create
+- **Observed:** the HotAisle team has a second member added 2026-01-25 with the `operator` role (can create
   and delete VMs on the team's bill). Flagged to the owner to confirm or remove in the HotAisle console.
-- **Workstation:** Tailscale installed and joined (100.70.180.72) for the tailnet-only path. Secrets in
+- **Workstation:** Tailscale installed and joined for the tailnet-only path. Secrets in
   `~/.config/hotaisle/secrets.sh` (mode 600, outside the repo).
 - **Pending:** HA-101 itself (tailnet-only check on a real VM) once HotAisle has capacity.
 
