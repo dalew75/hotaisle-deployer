@@ -270,11 +270,29 @@ if [[ -z "$GPU_IP" ]]; then
 JSON
 )
 
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "[!] jq is required to parse HotAisle responses."
+    exit 1
+  fi
+  API="https://admin.hotaisle.app/api/teams/${HOTAISLE_TEAM_NAME}"
+
+  # Capacity check first: HotAisle returns null / [] when no VM can be created right now.
+  AVAILABLE="$(curl -sS "${API}/virtual_machines/available/" \
+    -H "accept: application/json" -H "Authorization: Token ${HOTAISLE_TOKEN}")"
+  if ! jq . >/dev/null 2>&1 <<<"$AVAILABLE"; then
+    echo "[!] ERROR: unexpected reply from the availability check: ${AVAILABLE:0:300}"
+    exit 1
+  fi
+  if [[ "$(jq -r 'if type == "array" then length else (if . == null then 0 else 1 end) end' <<<"$AVAILABLE")" == "0" ]]; then
+    echo "[!] HotAisle has no VMs available to create right now (capacity). Nothing was created or billed."
+    echo "    Try again later, or check https://console.hotaisle.app."
+    exit 2
+  fi
+
   prov_start_ts=$(date +%s)
   echo "[*] POSTing payload to HotAisle..."
   RESPONSE="$(
-    curl -sS -X POST \
-      "https://admin.hotaisle.app/api/teams/${HOTAISLE_TEAM_NAME}/virtual_machines/" \
+    curl -sS -X POST "${API}/virtual_machines/" \
       -H "accept: application/json" \
       -H "Authorization: Token ${HOTAISLE_TOKEN}" \
       -H "Content-Type: application/json" \
@@ -283,25 +301,26 @@ JSON
   prov_end_ts=$(date +%s)
   provision_secs=$((prov_end_ts - prov_start_ts))
 
+  # A non-JSON or name-less reply means nothing was created; show HotAisle's message as is.
+  if ! jq . >/dev/null 2>&1 <<<"$RESPONSE"; then
+    echo "[!] ERROR: HotAisle refused the request: ${RESPONSE:0:500}"
+    exit 1
+  fi
+  VM_NAME="$(jq -r '.name // empty' <<<"$RESPONSE")"
+  if [[ -z "$VM_NAME" ]]; then
+    echo "[!] ERROR: HotAisle did not create a VM:"
+    jq . <<<"$RESPONSE"
+    exit 1
+  fi
+
   echo "------------------------------------------------------"
   echo "[*] HotAisle provision response:"
-  if command -v jq >/dev/null 2>&1; then
-    echo "$RESPONSE" | jq .
-  else
-    echo "$RESPONSE"
-  fi
+  jq 'del(.. | .password?, .token?)' <<<"$RESPONSE"
   echo "------------------------------------------------------"
 
   # Store VM name locally for destroy_vm.sh
-  VM_NAME="$(echo "$RESPONSE" | jq -r '.name')"
   echo "$VM_NAME" > "$LAST_VM_FILE"
   echo "[*] Recorded last provisioned VM name '$VM_NAME' in $LAST_VM_FILE"
-
-  # Extract IP: prefer ssh_access.ip_address, fallback to ip_address
-  if ! command -v jq >/dev/null 2>&1; then
-    echo "[!] jq is required to parse HotAisle response."
-    exit 1
-  fi
 
   GPU_IP="$(echo "$RESPONSE" | jq -r '.ssh_access.ip_address // .ip_address')"
 

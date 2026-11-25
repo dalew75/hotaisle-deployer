@@ -25,6 +25,7 @@ by default; provider-specific knowledge lives here, generic lifecycle logic in `
 | vLLM tuning | max-model-len (131072), trust-remote-code, Qwen3 tool stack, reasoning off, image override, extra args | `startup-vllm.sh` |
 | Network | tailnet only by default (TS_AUTHKEY required, ports bound to the tailnet IP, ufw); `--public` opt-out | `secure-net.sh`, startup scripts |
 | Secrets | mode-600 env file, sourced and deleted on the VM | `deploy_and_run.sh` |
+| Capacity | checks `virtual_machines/available/` before creating; exits 2 when none | `deploy_and_run.sh` |
 | Waiting | SSH retry loop with no timeout; spinner while the remote script runs (no progress) | `deploy_and_run.sh` |
 | Logs | opens `gnome-terminal` with `docker logs -f` when available | `deploy_and_run.sh` |
 | Cost tracking | none | — |
@@ -103,7 +104,9 @@ Order matters: HA-103 needs D2 decided; HA-102 follows ai-gateway's contract (AG
 ### Epic 1: Safe on-demand GPU
 
 #### HA-101 First paid run of the tailnet-only path
-Test · **P0** · Proposed · S
+Test · **P0** · Approved (2026-11-25), blocked: no HotAisle capacity on 2026-11-25 (nothing created) · S
+- **Ready:** workstation on Tailscale; `TS_AUTHKEY` etc. in `~/.config/hotaisle/secrets.sh`; run
+  `source ~/.config/hotaisle/secrets.sh && ./deploy_and_run.sh --backend ollama --model llama3.2:3b`.
 - **Expected:** API reachable at `http://gpu-hotaisle-<vm>:<port>/v1` from the tailnet only; public IP has only 22 open.
 - **Acceptance:** `curl` from outside the tailnet to `<public-ip>:<port>` fails; from the workstation over the tailnet it lists models; the node is removed from the tailnet after `destroy_vm.sh` (ephemeral key). Record cost and timings in `SECURITY-LOG.md` / the timeline.
 - **Open:** confirm `sudo -E` keeps the env on HotAisle's image; confirm the default login shell is bash (env file uses `printf %q`).
