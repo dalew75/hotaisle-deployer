@@ -1,8 +1,8 @@
 # AGENTS.md — hotaisle-deployer
 
 Bash tooling that rents an AMD MI300X VM on HotAisle and serves models with Ollama or vLLM. Read `README.md`
-for usage. No build system, package manager or tests; check changes with `bash -n` (and `shellcheck` when
-available).
+for usage. No build system, package manager or tests; check changes with `bash -n *.sh` and
+`shellcheck *.sh` (clean since HA-111; keep it clean, a deliberate exception gets a directive with the reason).
 
 **Role in the suite:** the HotAisle provider adapter for `../ai-gateway` (registry of AI providers with
 attributes such as local / private / cost, plus the GPU start/stop front door). `../digitalocean` is the
