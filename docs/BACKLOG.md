@@ -148,7 +148,7 @@ Bug · **P1** · Done (b343f0f) · S
 - See section C.
 
 #### HA-110 Readiness check
-Feature · **P1** · Proposed · S
+Feature · **P1** · Done (f50a72e), real-VM check with HA-101 · S
 - After the startup script, poll `/v1/models` over the tailnet until it answers (with a timeout) and only then print "ready".
 
 #### HA-111 shellcheck clean

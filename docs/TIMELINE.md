@@ -43,3 +43,4 @@ Format, one line per finished task, newest last:
 - 2026-11-25 · feat · HA-103 idle auto-stop from the workstation (cron, 30 min idle / 4 h cap); D2 = (b) decided · HA-103 D2 · 60a9fcb
 - 2026-11-25 · fix · HA-109 SSH and remote-setup timeouts, failed setup reported · HA-109 · b343f0f
 - 2026-11-25 · chore · HA-111 shellcheck clean (0.9.0) · HA-111 · 24c725a
+- 2026-11-25 · feat · HA-110 readiness check: wait for /v1/models over the tailnet before "ready" · HA-110 · f50a72e
