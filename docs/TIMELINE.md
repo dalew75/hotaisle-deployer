@@ -38,3 +38,4 @@ Format, one line per finished task, newest last:
 - 2026-11-25 · security · model API on the tailnet only (secure-net.sh, TS_AUTHKEY required), secrets via env file · HA-101 · 1535453
 - 2026-11-25 · docs · standard setup: AGENTS.md, README, BACKLOG (HA-101..112, proposed sprint), TIMELINE, SECURITY-LOG; role: HotAisle adapter for ai-gateway · HA-101 · 55f4caa
 - 2026-11-25 · fix · HA-101 attempt: HotAisle had no capacity (nothing created); capacity check before create, readable API errors · HA-101 · pending
+- 2026-11-25 · test · HA-101 retried on DigitalOcean (tailnet mode added there): RTX 6000 Ada create removed by DO after 7 s (no capacity); nothing ran · HA-101 · pending
