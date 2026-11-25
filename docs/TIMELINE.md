@@ -36,3 +36,4 @@ Format, one line per finished task, newest last:
 - 2026-04-27 · feat · required --backend, multi-model Ollama and vLLM, port flag (unpushed until 2026-11-25) (backfilled) · — · 3664ca9
 - 2026-11-25 · chore · merged the duplicate ~/dev/fresh-github checkout (vLLM flags, Gemma 4 hotfix), archived 5 old branches as tags, removed startup-amd.sh · — · e1551e9
 - 2026-11-25 · security · model API on the tailnet only (secure-net.sh, TS_AUTHKEY required), secrets via env file · HA-101 · 1535453
+- 2026-11-25 · docs · standard setup: AGENTS.md, README, BACKLOG (HA-101..112, proposed sprint), TIMELINE, SECURITY-LOG; role: HotAisle adapter for ai-gateway · HA-101 · 55f4caa
