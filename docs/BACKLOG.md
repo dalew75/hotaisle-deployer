@@ -117,7 +117,7 @@ Feature · **P1** · Proposed · M · depends on AG-2
 - **Code:** wraps `deploy_and_run.sh` / `destroy_vm.sh`; HotAisle API for listing VMs.
 
 #### HA-103 Idle auto-stop on the VM
-Feature · **P0** · Done (pending) · M · D2 = (b)
+Feature · **P0** · Done (60a9fcb), real-VM check pending · M · D2 = (b)
 - **Observed:** a forgotten VM bills until someone runs `destroy_vm.sh`.
 - **Acceptance:** after `IDLE_MINUTES` (default 30) with no API requests, the VM deletes itself (or is deleted), with a voice line (HA-105).
 - **Built:** `idle_stop.sh` (cron on the workstation): idle 30 min, never up in 90 min, or 4 h cap (warned 15 min before); waits out the minimum reservation; only deletes VMs `deploy_and_run.sh` recorded; announces unmanaged ones. Tested against a local mock (every case); not yet on a real VM (do it with HA-101 using `IDLE_MINUTES=5`).

@@ -3,6 +3,20 @@
 Newest first. Every security change or check: date, issue, before → after, what was done, how it was
 verified, what's still pending.
 
+## 2026-11-25 — Idle auto-stop (cost control) and API key scope findings
+
+- **Finding:** HotAisle API keys are scoped per team role (owner / purchaser / operator / user), not per VM
+  (`admin.hotaisle.app/api/docs/swagger.json`, read 2026-11-25). Deleting a VM needs `operator`, which can
+  also create VMs and delete any team VM. So no HotAisle key is placed on a VM (D2 = b).
+- **Change:** `idle_stop.sh` (`60a9fcb`) runs from cron on the workstation (every 5 min) with the existing
+  token in `~/.config/hotaisle/secrets.sh`. It reads only request counters over the tailnet (vLLM `/metrics`,
+  Ollama `/api/ps`), never prompts. It deletes only VMs `deploy_and_run.sh` recorded; others are announced
+  once, never deleted. Voice lines say only that a VM stopped and why.
+- **Verified:** every decision path against a local mock API (idle, busy, never up, cap, cap warning, minimum
+  reservation, VM gone, unmanaged VM); real-API dry run read-only with no VMs.
+- **Pending:** a real-VM check with `IDLE_MINUTES=5` during HA-101. Nothing stops a VM while the
+  workstation is off.
+
 ## 2026-11-25 — Tailnet-only bind verified on a real GPU (DigitalOcean H100, same pattern)
 
 - **Run:** owner approved one DigitalOcean `gpu-h100x1-80gb` test in ams3 ($4.41/hr, `doctl compute size
