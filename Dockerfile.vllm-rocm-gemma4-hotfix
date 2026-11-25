@@ -1,0 +1,32 @@
+# Thin image: official ROCm vLLM + one-line loader fix for Gemma 4 checkpoints that
+# expose model.embed_tokens.biases (KeyError in gemma4.py — upstream only skips ".bias").
+#
+# Build (on a machine with Docker):
+#   docker build -f Dockerfile.vllm-rocm-gemma4-hotfix -t vllm-rocm-gemma4-hotfix:latest .
+#
+# Deploy with:
+#   ./deploy_and_run.sh --backend vllm --vllm-image vllm-rocm-gemma4-hotfix:latest --model google/gemma-4-12b-it ...
+#
+# Base image: override if you pin versions, e.g. FROM vllm/vllm-openai-rocm:v0.21.0
+ARG BASE_IMAGE=vllm/vllm-openai-rocm:latest
+FROM ${BASE_IMAGE}
+
+USER root
+RUN python3 <<'PY'
+import pathlib
+
+import vllm.model_executor.models.gemma4 as gemma4
+
+path = pathlib.Path(gemma4.__file__)
+text = path.read_text()
+old = 'if name.endswith(".bias") and name not in params_dict:'
+new = 'if (name.endswith(".bias") or name.endswith(".biases")) and name not in params_dict:'
+n = text.count(old)
+if n != 1:
+    raise SystemExit(
+        f"vllm gemma4 hotfix: expected exactly 1 line matching patch anchor, found {n} "
+        f"in {path}. Update Dockerfile for your vLLM version."
+    )
+path.write_text(text.replace(old, new, 1))
+print(f"Patched {path}")
+PY
