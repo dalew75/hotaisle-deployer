@@ -15,6 +15,7 @@ attributes: local, private, cost, capabilities). It works fine on its own too.
 |---|---|---|
 | `deploy_and_run.sh` | your machine | Provisions a VM (unless you pass an IP), uploads the scripts below, runs them, prints the endpoint and timings |
 | `destroy_vm.sh` | your machine | Deletes a VM by name (default: the last one, from `~/.hotaisle_last_vm`) |
+| `idle_stop.sh` | your machine (cron) | Deletes VMs that are idle, never came up, or hit the hour cap |
 | `secure-net.sh` | the VM | Joins the VM to your tailnet and turns on ufw (skipped with `--public`) |
 | `startup-ollama.sh` | the VM | Docker + `ollama/ollama:rocm`, pulls the model(s), one port |
 | `startup-vllm.sh` | the VM | Docker + `vllm/vllm-openai-rocm`, one container per model on ports PORT, PORT+1, … |
@@ -55,6 +56,28 @@ the public IP only has SSH open. `deploy_and_run.sh` refuses to start without `T
   can use the GPU and read prompts. Only for throwaway tests.
 - Secrets (`TS_AUTHKEY`, `--hf-token`) are sent in a mode-600 env file that the VM deletes right after
   reading it. They never appear on the SSH command line.
+
+## Idle auto-stop
+
+`idle_stop.sh` runs from cron on your machine every 5 minutes and deletes a VM that `deploy_and_run.sh`
+created when:
+
+- nothing used the API for `IDLE_MINUTES` (default 30): vLLM's request counter in `/metrics`, or Ollama
+  having a model loaded (`/api/ps`; Ollama unloads 5 minutes after the last request);
+- the API never came up within `BOOT_GRACE_MINUTES` (default 90);
+- the VM is `MAX_HOURS` old (default 4), busy or not. A voice line warns 15 minutes before.
+
+It never deletes inside HotAisle's minimum reservation, and it never deletes VMs it didn't record (it
+announces those once instead). Each stop is announced through local NATS. It reads only counters over the
+tailnet, never prompts. It needs your machine on and online; a VM left running while it's off keeps billing.
+
+```bash
+*/5 * * * * ~/dev/github/dalew75/hotaisle-deployer/idle_stop.sh >/dev/null 2>&1   # crontab -e
+./idle_stop.sh --status     # recorded VMs, age, idle time
+./idle_stop.sh --dry-run    # what it would do now
+```
+
+Log: `~/.local/state/hotaisle-deployer/idle-stop.log`. Records: `~/.local/state/hotaisle-deployer/vms/`.
 
 ## Options (`deploy_and_run.sh`)
 

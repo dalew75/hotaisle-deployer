@@ -16,6 +16,7 @@ logic there.
 |---|---|
 | `deploy_and_run.sh` (`--backend ollama\|vllm`, `--public`, vLLM flags) | local |
 | `destroy_vm.sh [vm-name]` (default `~/.hotaisle_last_vm`) | local |
+| `idle_stop.sh [--dry-run\|--status]` (HA-103; cron every 5 min) | local |
 | `secure-net.sh` | **remote VM**, uploaded and run with sudo before the startup script |
 | `startup-ollama.sh` / `startup-vllm.sh` | **remote VM**, uploaded to `/home/<user>/start.sh` |
 
@@ -52,4 +53,8 @@ Remote scripts are never run locally. Their env arrives in `~/.deploy.env` (mode
 ## State files
 
 - `~/.hotaisle_last_vm`: last provisioned VM name (written by deploy, read and cleared by destroy).
+- `~/.local/state/hotaisle-deployer/vms/<vm>.json`: one record per VM `deploy_and_run.sh` created (written
+  right after create, removed by destroy); `idle_stop.sh` only ever deletes VMs listed here. Its log is
+  `idle-stop.log` in the same folder. Test it against a mock with `HOTAISLE_STATE_DIR`, `HOTAISLE_API`,
+  `HOTAISLE_SECRETS` and `NATS_PORT` (a closed port keeps alerts quiet).
 - `~/.ssh/known_hosts`: old entries for the target IP are removed on deploy.

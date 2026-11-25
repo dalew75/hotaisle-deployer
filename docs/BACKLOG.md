@@ -79,13 +79,13 @@ Goal: safe to start and stop from ai-gateway, with no way to forget a running VM
 1. **HA-101 First paid run of the tailnet-only path** (S). One short run on the cheapest model. *Verify:*
    API answers on the tailnet name, not on the public IP (`curl` from outside times out), VM leaves the
    tailnet after destroy.
-2. **HA-103 Idle auto-stop** (M). A small timer on the VM deletes itself after N idle minutes. *Verify:*
+2. **HA-103 Idle auto-stop** (M). The workstation polls over the tailnet and deletes after N idle minutes (D2 = b). *Verify:*
    with N=5, the VM is gone ~5 min after the last request.
 3. **HA-102 Lifecycle contract** (M). `hotaisle up|status|down|cost --json`. *Verify:* ai-gateway can parse
    every command; `status` matches the HotAisle API.
 4. **HA-106 Spend log + ceiling** and **HA-109 timeouts** (S each).
 
-Order matters: HA-103 needs D2 decided; HA-102 follows ai-gateway's contract (AG-2).
+Order matters: HA-102 follows ai-gateway's contract (AG-2).
 
 ---
 
@@ -94,7 +94,7 @@ Order matters: HA-103 needs D2 decided; HA-102 follows ai-gateway's contract (AG
 | # | Question | Affects | Options |
 |---|---|---|---|
 | D1 | Is a HotAisle VM "private" for the suite's private-text rule? | ai-gateway `private` attribute | (a) yes: rented single-tenant VM, tailnet only (b) only with extra steps (encrypted disk, no swap) (c) no |
-| D2 | How does idle auto-stop delete the VM? | HA-103 | (a) a HotAisle token scoped to that VM on the VM itself (b) the workstation polls and deletes (c) both |
+| D2 | How does idle auto-stop delete the VM? | HA-103 | **Decided 2026-11-25: (b) the workstation polls and deletes**, 30 min idle, 4 h cap. HotAisle keys are team-wide (the smallest role that can delete, `operator`, can also create VMs), so no key goes on the VM. |
 | D3 | Monthly spend ceiling for HotAisle | HA-106 | amount; what happens at 80% / 100% |
 
 ---
@@ -117,9 +117,11 @@ Feature · **P1** · Proposed · M · depends on AG-2
 - **Code:** wraps `deploy_and_run.sh` / `destroy_vm.sh`; HotAisle API for listing VMs.
 
 #### HA-103 Idle auto-stop on the VM
-Feature · **P0** · Proposed · M · depends on D2
+Feature · **P0** · Done (pending) · M · D2 = (b)
 - **Observed:** a forgotten VM bills until someone runs `destroy_vm.sh`.
 - **Acceptance:** after `IDLE_MINUTES` (default 30) with no API requests, the VM deletes itself (or is deleted), with a voice line (HA-105).
+- **Built:** `idle_stop.sh` (cron on the workstation): idle 30 min, never up in 90 min, or 4 h cap (warned 15 min before); waits out the minimum reservation; only deletes VMs `deploy_and_run.sh` recorded; announces unmanaged ones. Tested against a local mock (every case); not yet on a real VM (do it with HA-101 using `IDLE_MINUTES=5`).
+- **Gap:** nothing stops a VM while the workstation is off.
 
 #### HA-104 Keep model weights between VMs
 Feature · **P3** · Investigate · M

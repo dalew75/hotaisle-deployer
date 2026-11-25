@@ -48,7 +48,7 @@ fi
 : "${HOTAISLE_TEAM_NAME:?ERROR: HOTAISLE_TEAM_NAME is not set}"
 : "${HOTAISLE_TOKEN:?ERROR: HOTAISLE_TOKEN is not set}"
 
-URL="https://admin.hotaisle.app/api/teams/${HOTAISLE_TEAM_NAME}/virtual_machines/${VM_NAME}/"
+URL="${HOTAISLE_API:-https://admin.hotaisle.app/api}/teams/${HOTAISLE_TEAM_NAME}/virtual_machines/${VM_NAME}/"
 
 echo "------------------------------------------------------"
 echo "[*] Requesting deletion of VM:"
@@ -76,6 +76,8 @@ if [[ "$HTTP_STATUS" == "204" ]]; then
   echo "🎉 SUCCESS: VM '${VM_NAME}' was deleted (HTTP 204)."
   echo "Nothing returned in body, as expected."
   echo "------------------------------------------------------"
+  # Drop the idle auto-stop record (idle_stop.sh)
+  rm -f "${HOTAISLE_STATE_DIR:-$HOME/.local/state/hotaisle-deployer}/vms/${VM_NAME}.json"
   # Optionally clear the last VM file if it matches
   if [[ -f "$LAST_VM_FILE" ]]; then
     CURRENT_LAST="$(tr -d ' \n\r' < "$LAST_VM_FILE")"

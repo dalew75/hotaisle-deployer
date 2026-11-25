@@ -322,6 +322,22 @@ JSON
   echo "$VM_NAME" > "$LAST_VM_FILE"
   echo "[*] Recorded last provisioned VM name '$VM_NAME' in $LAST_VM_FILE"
 
+  # Record it for idle_stop.sh (HA-103) right away, so even a run that dies later still gets cleaned up.
+  VM_RECORD_DIR="${HOTAISLE_STATE_DIR:-$HOME/.local/state/hotaisle-deployer}/vms"
+  VM_RECORD="$VM_RECORD_DIR/$VM_NAME.json"
+  if [[ "$BACKEND" == "vllm" ]]; then
+    n_ports=$(tr ',' '\n' <<<"$VLLM_MODEL" | grep -c '[^[:space:]]')
+  else
+    n_ports=1
+  fi
+  mkdir -p "$VM_RECORD_DIR"
+  jq -n --arg name "$VM_NAME" --arg backend "$BACKEND" --argjson created "$prov_end_ts" \
+    --argjson port "$PORT_ARG" --argjson n "$n_ports" \
+    --argjson minres "$(jq '[.[]?.MinimumReservationMinutes // 0] | max // 0' <<<"$AVAILABLE" 2>/dev/null || echo 0)" \
+    '{name: $name, backend: $backend, created_at: $created, ports: [range($port; $port + $n)],
+      min_reservation_minutes: $minres, host: null}' >"$VM_RECORD"
+  echo "[*] Idle auto-stop record: $VM_RECORD (run ./idle_stop.sh --status)"
+
   GPU_IP="$(echo "$RESPONSE" | jq -r '.ssh_access.ip_address // .ip_address')"
 
   if [[ -z "$GPU_IP" || "$GPU_IP" == "null" ]]; then
@@ -370,6 +386,12 @@ echo "[+] Remote SSH is ready (waited ${ssh_wait_secs}s)."
 ###############################################################################
 TS_HOSTNAME="${TS_HOSTNAME:-gpu-hotaisle${VM_NAME:+-$VM_NAME}}"
 TS_HOSTNAME="$(echo "$TS_HOSTNAME" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9\n-' '-' | cut -c1-63)"
+
+# Tell idle_stop.sh where to probe: the tailnet name, or the public IP with --public
+if [[ -n "${VM_RECORD:-}" && -f "$VM_RECORD" ]]; then
+  probe_host="$TS_HOSTNAME"; [[ "$PUBLIC" == true ]] && probe_host="$GPU_IP"
+  jq --arg h "$probe_host" '.host = $h' "$VM_RECORD" >"$VM_RECORD.tmp" && mv "$VM_RECORD.tmp" "$VM_RECORD"
+fi
 
 ###############################################################################
 #  Build the remote env file (mode 600; secrets never on the SSH command line)
