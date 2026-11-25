@@ -11,6 +11,7 @@
 #   OLLAMA_PORT   - Host port for API (default: 8000); container listens on 11434
 #   OLLAMA_IMAGE  - Docker image (default: ollama/ollama:rocm)
 #   DATA_DIR      - Host path for Ollama data (default: /opt/ollama)
+#   TAILNET_ONLY  - 1 = publish the port on the Tailscale IP only (see secure-net.sh)
 
 set -euo pipefail
 
@@ -40,6 +41,22 @@ if [[ ! -e /dev/kfd ]]; then
   echo "[!] /dev/kfd not found. ROCm may not be set up correctly or GPU not exposed to this VM."
   echo "    The container may fail to use the GPU until ROCm / drivers are configured."
   echo
+fi
+
+# ---- Where to publish the API port -------------------------------------------
+# TAILNET_ONLY=1 (set by deploy_and_run.sh after secure-net.sh): bind to the Tailscale IP only,
+# so the API is never on the public interface. Docker-published ports bypass ufw, so this matters.
+if [[ "${TAILNET_ONLY:-0}" == "1" ]]; then
+  BIND_ADDR="$(tailscale ip -4 2>/dev/null | head -n1 || true)"
+  if [[ -z "$BIND_ADDR" ]]; then
+    echo "[!] ERROR: TAILNET_ONLY=1 but no tailnet IP (did secure-net.sh run?). Refusing to expose the API."
+    exit 1
+  fi
+  SHOW_HOST="${TS_HOSTNAME:-$BIND_ADDR}"  # MagicDNS name, or the 100.x IP
+else
+  BIND_ADDR="0.0.0.0"
+  SHOW_HOST="$(hostname -I | awk '{print $1}')"
+  echo "[!] WARNING: publishing the API on ALL interfaces (public, no auth)."
 fi
 
 # ---- Install Docker if needed ----------------------------------------------
@@ -74,7 +91,7 @@ sudo docker run -d \
   --device /dev/dri \
   --group-add video \
   --ipc=host \
-  -p "${OLLAMA_PORT}:11434" \
+  -p "${BIND_ADDR}:${OLLAMA_PORT}:11434" \
   -v "${DATA_DIR}:/root/.ollama" \
   "$OLLAMA_IMAGE"
 
@@ -92,7 +109,7 @@ echo "==============================================="
 echo "[✔] Ollama setup complete."
 echo
 echo "Ollama (OpenAI-compatible) endpoint:"
-echo "  http://$(hostname -I | awk '{print $1}'):${OLLAMA_PORT}/v1"
+echo "  http://${SHOW_HOST}:${OLLAMA_PORT}/v1"
 echo "  Models: ${OLLAMA_MODELS[*]}"
 echo
 echo "Logs:"

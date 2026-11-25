@@ -27,6 +27,12 @@ set -euo pipefail
 #  vLLM version: served from Docker (startup-vllm.sh), not host pip. Default image is vllm/vllm-openai-rocm:latest;
 #  each remote run does docker pull first, so :latest tracks new publishes. Pin with --vllm-image org/img:tag for reproducibility.
 #  Gemma 4 + KeyError embed_tokens.biases: see Dockerfile.vllm-rocm-gemma4-hotfix in this repo.
+#
+#  Network (default: tailnet only): TS_AUTHKEY must be set. secure-net.sh joins the VM to your tailnet
+#  (name TS_HOSTNAME, default gpu-hotaisle-<vm>) and the API ports are published on the tailnet IP only.
+#  --public: skip Tailscale and publish on all interfaces (no auth: anyone with the IP can use it).
+#  Secrets (TS_AUTHKEY, HF token) go to the VM in a mode-600 env file that is deleted after it is read,
+#  never on the SSH command line.
 #  Example: ./deploy_and_run.sh --backend ollama --model llama3.2:3b
 #           ./deploy_and_run.sh --backend ollama --model "llama3.2:3b,codellama:7b" --port 8000
 #           ./deploy_and_run.sh --backend vllm --model Qwen/Qwen2.5-72B-Instruct
@@ -52,6 +58,7 @@ VLLM_TRUST_CLI="" # empty = server defaults; 0/1 = explicit
 VLLM_NO_QWEN=false
 VLLM_DISABLE_REASONING_FLAG=false
 VLLM_IMAGE_ARG=""
+PUBLIC=false
 while [[ $# -gt 0 ]] && [[ "$1" == -* ]]; do
   case "$1" in
     --backend)
@@ -98,6 +105,10 @@ while [[ $# -gt 0 ]] && [[ "$1" == -* ]]; do
       VLLM_IMAGE_ARG="$2"
       shift 2
       ;;
+    --public)
+      PUBLIC=true
+      shift
+      ;;
     *)
       echo "[!] Unknown option: $1"
       exit 1
@@ -109,6 +120,16 @@ GPU_IP="${1:-}"
 # Require --backend ollama or vllm
 if [[ "$BACKEND" != "ollama" && "$BACKEND" != "vllm" ]]; then
   echo "[!] ERROR: Must specify --backend ollama or --backend vllm."
+  exit 1
+fi
+
+# Tailnet-only unless --public (checked before anything is provisioned or billed)
+if [[ "$PUBLIC" == true ]]; then
+  echo "[!] WARNING: --public: the model API will be open on the VM's public IP with no auth."
+elif [[ -z "${TS_AUTHKEY:-}" ]]; then
+  echo "[!] ERROR: TS_AUTHKEY is not set. The API is only exposed over Tailscale by default."
+  echo "    Create an ephemeral, pre-authorized auth key (tag e.g. tag:gpu) and export TS_AUTHKEY,"
+  echo "    or pass --public to expose it on the public IP without auth (not recommended)."
   exit 1
 fi
 
@@ -326,15 +347,56 @@ ssh_wait_secs=$((ssh_wait_end_ts - ssh_wait_start_ts))
 echo "[+] Remote SSH is ready (waited ${ssh_wait_secs}s)."
 
 ###############################################################################
-#  Upload startup script
+#  Tailnet name for this VM
 ###############################################################################
-echo "[*] Copying $LOCAL_SCRIPT to $GPU_IP:$REMOTE_PATH ..."
+TS_HOSTNAME="${TS_HOSTNAME:-gpu-hotaisle${VM_NAME:+-$VM_NAME}}"
+TS_HOSTNAME="$(echo "$TS_HOSTNAME" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9\n-' '-' | cut -c1-63)"
+
+###############################################################################
+#  Build the remote env file (mode 600; secrets never on the SSH command line)
+###############################################################################
+ENV_FILE="$(mktemp "${TMPDIR:-/tmp}/hotaisle_env.XXXXXX")"
+chmod 600 "$ENV_FILE"
+trap 'rm -f "$ENV_FILE"' EXIT
+add_env() { printf 'export %s=%q\n' "$1" "$2" >> "$ENV_FILE"; }
+
+if [[ "$PUBLIC" == true ]]; then
+  add_env TAILNET_ONLY 0
+else
+  add_env TAILNET_ONLY 1
+  add_env TS_AUTHKEY "$TS_AUTHKEY"
+  add_env TS_HOSTNAME "$TS_HOSTNAME"
+fi
+if [[ "$BACKEND" == "vllm" ]]; then
+  add_env VLLM_MODEL "$VLLM_MODEL"
+  add_env VLLM_PORT "$VLLM_PORT"
+  [[ -n "$VLLM_MAX_LEN_CLI" ]] && add_env VLLM_MAX_MODEL_LEN "$VLLM_MAX_LEN_CLI"
+  [[ -n "$VLLM_TRUST_CLI" ]] && add_env VLLM_TRUST_REMOTE_CODE "$VLLM_TRUST_CLI"
+  [[ "$VLLM_NO_QWEN" == true ]] && add_env VLLM_USE_QWEN3_TOOL_STACK 0
+  [[ "$VLLM_DISABLE_REASONING_FLAG" == true ]] && add_env VLLM_DISABLE_REASONING 1
+  [[ -n "$VLLM_IMAGE_ARG" ]] && add_env VLLM_IMAGE "$VLLM_IMAGE_ARG"
+  [[ -n "$HF_TOKEN_ARG" ]] && add_env HF_TOKEN "$HF_TOKEN_ARG"
+  [[ -n "$VLLM_EXTRA_ARGS_ARG" ]] && add_env VLLM_EXTRA_ARGS "$VLLM_EXTRA_ARGS_ARG"
+else
+  add_env OLLAMA_MODEL "$OLLAMA_MODEL"
+  add_env OLLAMA_PORT "$OLLAMA_PORT"
+fi
+
+###############################################################################
+#  Upload startup script, secure-net.sh and the env file
+###############################################################################
+REMOTE_DIR="/home/${REMOTE_USER}"
+REMOTE_ENV="${REMOTE_DIR}/.deploy.env"
+REMOTE_NET="${REMOTE_DIR}/secure-net.sh"
+echo "[*] Copying $LOCAL_SCRIPT, secure-net.sh and env to $GPU_IP ..."
 scp_start_ts=$(date +%s)
-scp -o StrictHostKeyChecking=accept-new "$LOCAL_SCRIPT" \
-    "${REMOTE_USER}@${GPU_IP}:${REMOTE_PATH}"
+ssh $SSH_OPTS "${REMOTE_USER}@${GPU_IP}" "umask 077; : > ${REMOTE_ENV}"
+scp -q -o StrictHostKeyChecking=accept-new "$ENV_FILE" "${REMOTE_USER}@${GPU_IP}:${REMOTE_ENV}"
+scp -q -o StrictHostKeyChecking=accept-new "$LOCAL_SCRIPT" "${REMOTE_USER}@${GPU_IP}:${REMOTE_PATH}"
+scp -q -o StrictHostKeyChecking=accept-new "secure-net.sh" "${REMOTE_USER}@${GPU_IP}:${REMOTE_NET}"
 scp_end_ts=$(date +%s)
 scp_secs=$((scp_end_ts - scp_start_ts))
-echo "[+] Script copied (scp: ${scp_secs}s)."
+echo "[+] Files copied (scp: ${scp_secs}s)."
 
 ###############################################################################
 #  Run remote setup (with progress indicator)
@@ -346,30 +408,11 @@ else
 fi
 startup_start_ts=$(date +%s)
 
-# Run remote startup in background (pass backend-specific env)
-if [[ "$BACKEND" == "vllm" ]]; then
-  VLLM_MODEL_ESCAPED=$(echo "$VLLM_MODEL" | sed "s/'/'\\\\''/g")
-  HF_TOKEN_ESC=""
-  [[ -n "$HF_TOKEN_ARG" ]] && HF_TOKEN_ESC="export HF_TOKEN='$(echo "$HF_TOKEN_ARG" | sed "s/'/'\\\\''/g")'; "
-  VLLM_EXTRA_ESC=""
-  [[ -n "$VLLM_EXTRA_ARGS_ARG" ]] && VLLM_EXTRA_ESC="export VLLM_EXTRA_ARGS='$(echo "$VLLM_EXTRA_ARGS_ARG" | sed "s/'/'\\\\''/g")'; "
-  VLLM_MAX_ESC=""
-  [[ -n "$VLLM_MAX_LEN_CLI" ]] && VLLM_MAX_ESC="export VLLM_MAX_MODEL_LEN='$(echo "$VLLM_MAX_LEN_CLI" | sed "s/'/'\\\\''/g")'; "
-  VLLM_TRUST_ESC=""
-  [[ -n "$VLLM_TRUST_CLI" ]] && VLLM_TRUST_ESC="export VLLM_TRUST_REMOTE_CODE='$(echo "$VLLM_TRUST_CLI" | sed "s/'/'\\\\''/g")'; "
-  VLLM_QWEN_STACK_ESC=""
-  [[ "$VLLM_NO_QWEN" == true ]] && VLLM_QWEN_STACK_ESC="export VLLM_USE_QWEN3_TOOL_STACK='0'; "
-  VLLM_IMAGE_ESC=""
-  [[ -n "$VLLM_IMAGE_ARG" ]] && VLLM_IMAGE_ESC="export VLLM_IMAGE='$(echo "$VLLM_IMAGE_ARG" | sed "s/'/'\\\\''/g")'; "
-  VLLM_DISABLE_REASONING_ESC=""
-  [[ "$VLLM_DISABLE_REASONING_FLAG" == true ]] && VLLM_DISABLE_REASONING_ESC="export VLLM_DISABLE_REASONING='1'; "
-  ssh $SSH_OPTS "${REMOTE_USER}@${GPU_IP}" \
-    "export VLLM_MODEL='${VLLM_MODEL_ESCAPED}'; export VLLM_PORT='${VLLM_PORT}'; ${VLLM_MAX_ESC}${VLLM_TRUST_ESC}${VLLM_QWEN_STACK_ESC}${VLLM_DISABLE_REASONING_ESC}${VLLM_IMAGE_ESC}${HF_TOKEN_ESC}${VLLM_EXTRA_ESC}chmod +x ${REMOTE_PATH} && sudo -E ${REMOTE_PATH}" &
-else
-  OLLAMA_MODEL_ESCAPED=$(echo "$OLLAMA_MODEL" | sed "s/'/'\\\\''/g")
-  ssh $SSH_OPTS "${REMOTE_USER}@${GPU_IP}" \
-    "export OLLAMA_MODEL='${OLLAMA_MODEL_ESCAPED}'; export OLLAMA_PORT='${OLLAMA_PORT}'; chmod +x ${REMOTE_PATH} && sudo -E ${REMOTE_PATH}" &
-fi
+# The env file is read into the shell and deleted before anything else runs.
+NET_STEP=""
+[[ "$PUBLIC" == true ]] || NET_STEP="sudo -E ${REMOTE_NET} && "
+ssh $SSH_OPTS "${REMOTE_USER}@${GPU_IP}" \
+  "set -a; . ${REMOTE_ENV}; set +a; rm -f ${REMOTE_ENV}; chmod +x ${REMOTE_PATH} ${REMOTE_NET} && ${NET_STEP}sudo -E ${REMOTE_PATH}" &
 ssh_pid=$!
 
 # Simple spinner while the remote script is running
@@ -430,6 +473,12 @@ fi
 script_end_ts=$(date +%s)
 total_secs=$((script_end_ts - script_start_ts))
 
+if [[ "$PUBLIC" == true ]]; then
+  echo "[!] API is PUBLIC on ${GPU_IP} (no auth)."
+else
+  FIRST_PORT="${VLLM_PORT:-$OLLAMA_PORT}"
+  echo "[+] API (tailnet only): http://${TS_HOSTNAME}:${FIRST_PORT}/v1"
+fi
 echo "Timing summary (seconds):"
 echo "  HotAisle provision : ${provision_secs}s"
 echo "  SSH wait           : ${ssh_wait_secs}s"

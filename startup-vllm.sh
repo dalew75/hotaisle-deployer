@@ -30,6 +30,7 @@
 #   VLLM_DISABLE_REASONING - If 1/true/yes, disable thinking/reasoning-style serving: adds
 #       --default-chat-template-kwargs '{"enable_thinking": false}' (Gemma, Qwen3, etc.; vLLM dropped --enable-reasoning),
 #       and omits the preset --reasoning-parser when the Qwen3 tool stack is still enabled (tools without reasoning parser).
+#   TAILNET_ONLY   - 1 = publish ports on the Tailscale IP only (see secure-net.sh)
 #   VLLM_EXTRA_ARGS - Extra flags passed through after the above (e.g. --quantization awq; duplicate flags may be last-wins).
 #
 # See: https://docs.vllm.ai/en/stable/getting_started/installation/gpu.html?device=rocm
@@ -123,6 +124,22 @@ if [[ ! -e /dev/kfd ]]; then
   echo
 fi
 
+# ---- Where to publish the API port -------------------------------------------
+# TAILNET_ONLY=1 (set by deploy_and_run.sh after secure-net.sh): bind to the Tailscale IP only,
+# so the API is never on the public interface. Docker-published ports bypass ufw, so this matters.
+if [[ "${TAILNET_ONLY:-0}" == "1" ]]; then
+  BIND_ADDR="$(tailscale ip -4 2>/dev/null | head -n1 || true)"
+  if [[ -z "$BIND_ADDR" ]]; then
+    echo "[!] ERROR: TAILNET_ONLY=1 but no tailnet IP (did secure-net.sh run?). Refusing to expose the API."
+    exit 1
+  fi
+  SHOW_HOST="${TS_HOSTNAME:-$BIND_ADDR}"  # MagicDNS name, or the 100.x IP
+else
+  BIND_ADDR="0.0.0.0"
+  SHOW_HOST="$(hostname -I | awk '{print $1}')"
+  echo "[!] WARNING: publishing the API on ALL interfaces (public, no auth)."
+fi
+
 # ---- Install Docker if needed ----------------------------------------------
 if ! command -v docker &>/dev/null; then
   echo "[*] Docker not found. Installing docker.io..."
@@ -144,7 +161,6 @@ sudo docker pull "$VLLM_IMAGE"
 # ---- Run one vLLM container per model (DRY loop) ----------------------------
 # Image entrypoint is "vllm serve"; pass model as positional, then flags.
 # Single model -> container name "vllm"; multiple -> "vllm-8000", "vllm-8001", ...
-HOST_IP=$(hostname -I | awk '{print $1}')
 for i in "${!VLLM_MODELS[@]}"; do
   model="${VLLM_MODELS[i]}"
   port=$((VLLM_PORT + i))
@@ -168,7 +184,7 @@ for i in "${!VLLM_MODELS[@]}"; do
     -v "${HF_CACHE_DIR}:/root/.cache/huggingface" \
     ${HF_TOKEN:+--env "HF_TOKEN=$HF_TOKEN"} \
     ${HF_TOKEN:+--env "HUGGING_FACE_HUB_TOKEN=$HF_TOKEN"} \
-    -p "${port}:8000" \
+    -p "${BIND_ADDR}:${port}:8000" \
     --ipc=host \
     "$VLLM_IMAGE" \
     "$model" \
@@ -196,6 +212,6 @@ for i in "${!VLLM_MODELS[@]}"; do
   else
     name="vllm-${port}"
   fi
-  echo "  http://${HOST_IP}:${port}/v1  (${VLLM_MODELS[i]})  logs: docker logs -f $name"
+  echo "  http://${SHOW_HOST}:${port}/v1  (${VLLM_MODELS[i]})  logs: docker logs -f $name"
 done
 echo "==============================================="
