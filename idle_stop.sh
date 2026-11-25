@@ -57,7 +57,10 @@ json_str() { local s="${1//\\/\\\\}"; s="${s//\"/\\\"}"; printf '"%s"' "$s"; }
 nats_pub() {
   local subject="$1" payload="$2"
   (
-    set -a; . "${NATS_CREDENTIALS_FILE:-$HOME/.config/nats/credentials.env}" 2>/dev/null; set +a
+    set -a
+    # shellcheck source=/dev/null
+    . "${NATS_CREDENTIALS_FILE:-$HOME/.config/nats/credentials.env}" 2>/dev/null
+    set +a
     exec 3<>"/dev/tcp/${NATS_HOST:-localhost}/${NATS_PORT:-4222}" || exit 1
     printf 'CONNECT {"verbose":false,"name":"hotaisle-idle-stop","user":%s,"pass":%s}\r\nPUB %s %d\r\n%s\r\nPING\r\n' \
       "$(json_str "${NATS_USER:-}")" "$(json_str "${NATS_PASS:-${NATS_PASSWORD:-}}")" \
@@ -145,6 +148,7 @@ if [[ "$MODE" == status ]]; then
 fi
 
 # Secrets: only needed when there is something to check
+# shellcheck source=/dev/null
 if [[ -f "$SECRETS" ]]; then set -a; . "$SECRETS"; set +a; fi
 : "${HOTAISLE_TEAM_NAME:?HOTAISLE_TEAM_NAME is not set (see $SECRETS)}"
 : "${HOTAISLE_TOKEN:?HOTAISLE_TOKEN is not set (see $SECRETS)}"
@@ -173,6 +177,7 @@ for f in "${records[@]}"; do
     if [[ -z "$last" || "$busy" == 1 || "$counter" != "${prev:-$counter}" ]]; then
       last=$now   # first time up, a request in flight, or the request counter moved
     fi
+    # shellcheck disable=SC2016  # $la and $c are jq variables
     [[ "$MODE" == run ]] && rec_set "$f" '.last_activity = $la | .last_counter = $c' \
       --argjson la "$last" --arg c "$counter"
   fi

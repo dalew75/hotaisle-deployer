@@ -174,6 +174,8 @@ for i in "${!VLLM_MODELS[@]}"; do
     sudo docker rm -f "$name"
   fi
   echo "[*] Starting vLLM container: $model on port $port (name: $name) ..."
+  # VLLM_EXTRA_ARGS is left unquoted on purpose so it splits into separate vLLM flags.
+  # shellcheck disable=SC2086
   sudo docker run -d \
     --name "$name" \
     --group-add=video \

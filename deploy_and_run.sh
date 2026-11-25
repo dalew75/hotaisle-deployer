@@ -384,14 +384,14 @@ fi
 ###############################################################################
 #  SSH connection options
 ###############################################################################
-SSH_OPTS="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 -o ServerAliveInterval=30 -o ServerAliveCountMax=4"
+SSH_OPTS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 -o ServerAliveInterval=30 -o ServerAliveCountMax=4)
 
 ###############################################################################
 #  Wait for VM to be reachable
 ###############################################################################
 echo "[*] Checking if $GPU_IP is reachable via SSH..."
 ssh_wait_start_ts=$(date +%s)
-until ssh $SSH_OPTS -o BatchMode=yes "${REMOTE_USER}@${GPU_IP}" "echo connected" &>/dev/null; do
+until ssh "${SSH_OPTS[@]}" -o BatchMode=yes "${REMOTE_USER}@${GPU_IP}" "echo connected" &>/dev/null; do
   if (( $(date +%s) - ssh_wait_start_ts >= SSH_TIMEOUT )); then
     echo "[!] ERROR: ${GPU_IP} did not accept SSH within ${SSH_TIMEOUT}s (SSH_TIMEOUT)."
     vm_left_running
@@ -454,7 +454,8 @@ REMOTE_ENV="${REMOTE_DIR}/.deploy.env"
 REMOTE_NET="${REMOTE_DIR}/secure-net.sh"
 echo "[*] Copying $LOCAL_SCRIPT, secure-net.sh and env to $GPU_IP ..."
 scp_start_ts=$(date +%s)
-ssh $SSH_OPTS "${REMOTE_USER}@${GPU_IP}" "umask 077; : > ${REMOTE_ENV}"
+# shellcheck disable=SC2029  # REMOTE_ENV is a fixed path chosen here, expanded on purpose
+ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${GPU_IP}" "umask 077; : > ${REMOTE_ENV}"
 scp -q -o StrictHostKeyChecking=accept-new "$ENV_FILE" "${REMOTE_USER}@${GPU_IP}:${REMOTE_ENV}"
 scp -q -o StrictHostKeyChecking=accept-new "$LOCAL_SCRIPT" "${REMOTE_USER}@${GPU_IP}:${REMOTE_PATH}"
 scp -q -o StrictHostKeyChecking=accept-new "secure-net.sh" "${REMOTE_USER}@${GPU_IP}:${REMOTE_NET}"
@@ -475,7 +476,8 @@ startup_start_ts=$(date +%s)
 # The env file is read into the shell and deleted before anything else runs.
 NET_STEP=""
 [[ "$PUBLIC" == true ]] || NET_STEP="sudo -E ${REMOTE_NET} && "
-ssh $SSH_OPTS "${REMOTE_USER}@${GPU_IP}" \
+# shellcheck disable=SC2029  # paths are chosen here and expanded on purpose; secrets stay in the env file
+ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${GPU_IP}" \
   "set -a; . ${REMOTE_ENV}; set +a; rm -f ${REMOTE_ENV}; chmod +x ${REMOTE_PATH} ${REMOTE_NET} && ${NET_STEP}sudo -E ${REMOTE_PATH}" &
 ssh_pid=$!
 
@@ -528,12 +530,12 @@ if command -v gnome-terminal >/dev/null 2>&1; then
   if [[ "$BACKEND" == "vllm" ]]; then
     echo "[*] Opening new terminal for 'docker logs -f ${FIRST_VLLM_CONTAINER}'..."
     gnome-terminal -- bash -lc \
-      "ssh $SSH_OPTS ${REMOTE_USER}@${GPU_IP} 'docker logs -f ${FIRST_VLLM_CONTAINER}'; \
+      "ssh ${SSH_OPTS[*]} ${REMOTE_USER}@${GPU_IP} 'docker logs -f ${FIRST_VLLM_CONTAINER}'; \
        echo; echo 'vLLM logs ended. Press Enter to close.'; read"
   else
     echo "[*] Opening new terminal for 'docker logs -f ollama'..."
     gnome-terminal -- bash -lc \
-      "ssh $SSH_OPTS ${REMOTE_USER}@${GPU_IP} 'docker logs -f ollama'; \
+      "ssh ${SSH_OPTS[*]} ${REMOTE_USER}@${GPU_IP} 'docker logs -f ollama'; \
        echo; echo 'Ollama logs ended. Press Enter to close.'; read"
   fi
 else
