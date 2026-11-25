@@ -3,6 +3,20 @@
 Newest first. Every security change or check: date, issue, before → after, what was done, how it was
 verified, what's still pending.
 
+## 2026-11-25 — Tailnet-only bind verified on a real GPU (DigitalOcean H100, same pattern)
+
+- **Run:** owner approved one DigitalOcean `gpu-h100x1-80gb` test in ams3 ($4.41/hr, `doctl compute size
+  list`, 2026-11-25) after the capacity watcher reported ams3. `../digitalocean` `deploy_gpu.sh` +
+  `deploy_model.sh` with `TS_AUTHKEY` (ephemeral), vLLM `v0.30.0`, `Qwen/Qwen2.5-0.5B-Instruct`. Wrapper
+  destroyed the droplet on exit. Created 07:53, destroyed 08:01 (about 7 min, about $0.55).
+- **Verified:** on the droplet, `ss -ltnp` showed port 8000 bound only to its tailnet IP (`docker-proxy`);
+  from the workstation, `/v1/models` and a chat completion answered over the tailnet; `curl` to the public
+  IP on 8000 was refused. After destroy: DELETE returned 204, `doctl compute droplet list` no longer shows
+  it, and `tailscale status` has no `gpu-do-*` node.
+- **Scope:** proves the "bind to the tailnet IP, Docker can't bypass it" approach on real hardware. It does
+  not run this repo's scripts (`secure-net.sh`, ufw, `startup-*.sh`, the env-file handoff, Ollama).
+- **Pending:** HA-101 on HotAisle itself once it has capacity.
+
 ## 2026-11-25 — HA-101 attempt: no capacity; second operator on the HotAisle team
 
 - **Run:** owner approved one 1× MI300X test ($2.99/hr, hotaisle.xyz/pricing, 2026-11-25). The create request

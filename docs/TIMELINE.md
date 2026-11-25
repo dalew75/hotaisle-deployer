@@ -39,3 +39,4 @@ Format, one line per finished task, newest last:
 - 2026-11-25 · docs · standard setup: AGENTS.md, README, BACKLOG (HA-101..112, proposed sprint), TIMELINE, SECURITY-LOG; role: HotAisle adapter for ai-gateway · HA-101 · 55f4caa
 - 2026-11-25 · fix · HA-101 attempt: HotAisle had no capacity (nothing created); capacity check before create, readable API errors · HA-101 · pending
 - 2026-11-25 · test · HA-101 retried on DigitalOcean (tailnet mode added there): RTX 6000 Ada create removed by DO after 7 s (no capacity); nothing ran · HA-101 · pending
+- 2026-11-25 · test · tailnet-only bind verified on a DigitalOcean H100 (ams3, ~7 min): API on tailnet only, public port refused, droplet and node gone after destroy; HotAisle run still pending · HA-101 · see SECURITY-LOG
