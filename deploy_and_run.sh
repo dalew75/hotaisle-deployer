@@ -35,7 +35,8 @@ set -euo pipefail
 #  never on the SSH command line.
 #
 #  Timeouts (env): SSH_TIMEOUT (default 600 s) for the VM to accept SSH; STARTUP_TIMEOUT (default 3600 s)
-#  for the remote setup incl. image and model pulls. On a timeout the script exits non-zero and says how to
+#  for the remote setup incl. image and model pulls; READY_TIMEOUT (default 2700 s) for every model API to
+#  answer /v1/models afterwards (vLLM loads weights after the setup script returns). On a timeout the script exits non-zero and says how to
 #  delete the VM (idle_stop.sh also deletes a recorded VM whose API never comes up).
 #  Example: ./deploy_and_run.sh --backend ollama --model llama3.2:3b
 #           ./deploy_and_run.sh --backend ollama --model "llama3.2:3b,codellama:7b" --port 8000
@@ -51,8 +52,9 @@ KNOWN_HOSTS_FILE="${HOME}/.ssh/known_hosts"
 LAST_VM_FILE="${HOME}/.hotaisle_last_vm"
 SSH_TIMEOUT="${SSH_TIMEOUT:-600}"
 STARTUP_TIMEOUT="${STARTUP_TIMEOUT:-3600}"
-[[ "$SSH_TIMEOUT" =~ ^[0-9]+$ && "$STARTUP_TIMEOUT" =~ ^[0-9]+$ ]] || {
-  echo "[!] ERROR: SSH_TIMEOUT and STARTUP_TIMEOUT must be whole seconds."; exit 1; }
+READY_TIMEOUT="${READY_TIMEOUT:-2700}"
+[[ "$SSH_TIMEOUT" =~ ^[0-9]+$ && "$STARTUP_TIMEOUT" =~ ^[0-9]+$ && "$READY_TIMEOUT" =~ ^[0-9]+$ ]] || {
+  echo "[!] ERROR: SSH_TIMEOUT, STARTUP_TIMEOUT and READY_TIMEOUT must be whole seconds."; exit 1; }
 
 # What to tell the user when we give up on a VM that may still be billing
 vm_left_running() {
@@ -198,6 +200,7 @@ provision_secs=0
 ssh_wait_secs=0
 scp_secs=0
 startup_secs=0
+ready_secs=0
 
 echo "------------------------------------------------------"
 echo "[*] Backend:         $BACKEND"
@@ -549,6 +552,37 @@ else
 fi
 
 ###############################################################################
+#  Readiness: every model API answers /v1/models (HA-110)
+###############################################################################
+# Ask from this machine, the way clients will: over the tailnet name, or the public IP with --public.
+API_HOST="$TS_HOSTNAME"; [[ "$PUBLIC" == true ]] && API_HOST="$GPU_IP"
+if [[ "$BACKEND" == "vllm" ]]; then
+  n_ready=$(tr ',' '\n' <<<"$VLLM_MODEL" | grep -c '[^[:space:]]')
+  READY_PORTS=()
+  for ((k = 0; k < n_ready; k++)); do READY_PORTS+=($((VLLM_PORT + k))); done
+else
+  READY_PORTS=("$OLLAMA_PORT")
+fi
+echo "[*] Waiting for the model API to answer on ${API_HOST} port(s) ${READY_PORTS[*]} (up to ${READY_TIMEOUT}s)..."
+ready_start_ts=$(date +%s)
+for port in "${READY_PORTS[@]}"; do
+  until curl -sf --max-time 10 "http://${API_HOST}:${port}/v1/models" 2>/dev/null | jq -e '.data | length > 0' >/dev/null 2>&1; do
+    if (( $(date +%s) - ready_start_ts >= READY_TIMEOUT )); then
+      printf "\n"
+      echo "[!] ERROR: http://${API_HOST}:${port}/v1/models did not answer within ${READY_TIMEOUT}s (READY_TIMEOUT)."
+      echo "    Check the container logs: ssh ${REMOTE_USER}@${GPU_IP} 'docker ps -a; docker logs --tail 50 <container>'"
+      vm_left_running
+      exit 1
+    fi
+    printf "\r[ready] Waiting for port %s... %ss" "$port" "$(( $(date +%s) - ready_start_ts ))"
+    sleep 10
+  done
+  printf "\r[+] Port %s answers /v1/models.%-30s\n" "$port" ""
+done
+ready_secs=$(( $(date +%s) - ready_start_ts ))
+echo "[✔] Ready: the model API answers (ready wait: ${ready_secs}s)."
+
+###############################################################################
 #  Final timing summary (last thing printed)
 ###############################################################################
 script_end_ts=$(date +%s)
@@ -565,5 +599,6 @@ echo "  HotAisle provision : ${provision_secs}s"
 echo "  SSH wait           : ${ssh_wait_secs}s"
 echo "  Script upload (scp): ${scp_secs}s"
 echo "  Remote startup     : ${startup_secs}s"
+echo "  Ready wait         : ${ready_secs}s"
 echo "  TOTAL              : ${total_secs}s"
 echo "------------------------------------------------------"

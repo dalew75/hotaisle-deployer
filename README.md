@@ -64,6 +64,10 @@ setup (image and model pulls included) doesn't finish within `STARTUP_TIMEOUT` (
 non-zero and prints the `destroy_vm.sh` line for the VM, which is still billing; `idle_stop.sh` also deletes it
 once it counts as never up. Raise `STARTUP_TIMEOUT` for very large models.
 
+After the setup it waits until every model API answers `/v1/models` from your machine (over the tailnet name,
+or the public IP with `--public`), up to `READY_TIMEOUT` (default 2700 s), and only then prints "Ready". vLLM
+loads weights after the setup script returns, so this wait is where large models spend their time.
+
 ## Idle auto-stop
 
 `idle_stop.sh` runs from cron on your machine every 5 minutes and deletes a VM that `deploy_and_run.sh`
